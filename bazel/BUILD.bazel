@@ -1,0 +1,20 @@
+config_setting(
+    name = "opt_build",
+    values = {"compilation_mode": "opt"},
+)
+
+config_setting(
+    name = "dbg_build",
+    values = {"compilation_mode": "dbg"},
+)
+
+config_setting(
+    name = "fast_build",
+    values = {"compilation_mode": "fastbuild"},
+)
+
+filegroup(
+    name = "cat_to_string_view_bat",
+    srcs = ["cat_to_string_view.bat"],
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,16 @@
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "stb",
+    hdrs = [":all_srcs"],
+    visibility = ["//visibility:public"],
+    defines = ["STB_IMAGE_IMPLEMENTATION" ,  "STBI_FAILURE_USERMSG"],
+    deps = [
+    ],
+)

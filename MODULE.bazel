@@ -1,0 +1,224 @@
+module(
+    name = "gravity",
+    version = "0.0.1",
+)
+
+bazel_dep(name = "boost.asio", version = "1.89.0.bcr.2")
+
+# This forces all dependencies to use the newer version
+single_version_override(
+    module_name = "boringssl",
+    version = "0.20251002.0",
+)
+
+bazel_dep(name = "rules_cc", version = "0.0.17")
+git_override(
+    module_name = "rules_cc",
+    commit = "37bd3705999c6cf6f85e09f8e1a5aed025102e15",
+    remote = "https://github.com/jerbdroid/rules_cc.git",
+)
+
+bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
+git_override(
+    module_name = "hedron_compile_commands",
+    commit = "4f28899228fb3ad0126897876f147ca15026151e",
+    remote = "https://github.com/hedronvision/bazel-compile-commands-extractor.git",
+)
+
+bazel_dep(name = "big_file_container", version = "0.0.1")
+git_override(
+    module_name = "big_file_container",
+    commit = "ac038f25dafb8ef7a27ad37c1bc9c6ff03a5105f",
+    remote = "https://github.com/jerbdroid/BigFileContainer.git",
+)
+
+bazel_dep(name = "entt", version = "3.12.2")
+git_override(
+    module_name = "entt",
+    commit = "9a19f9aa2f5c7d822ceeea06bce1b0a882c2cb97",
+    remote = "https://github.com/skypjack/entt.git",
+)
+
+bazel_dep(name = "lua", version = "5.4.6")
+git_override(
+    module_name = "lua",
+    commit = "4ddc2dc54adcda070caef7474941d43fd9fc8743",
+    remote = "https://github.com/jerbdroid/lua.git",
+)
+
+bazel_dep(name = "sol2", version = "3.3.0")
+git_override(
+    module_name = "sol2",
+    commit = "2a2a65aca0a99ccd03e80c88045c4855682bccde",
+    remote = "https://github.com/jerbdroid/sol2.git",
+)
+
+bazel_dep(name = "crypto", version = "1.0.0")
+git_override(
+    module_name = "crypto",
+    commit = "0f17d8e9f966086b99b009007f2394154a35df0b",
+    remote = "https://github.com/jerbdroid/crypto-algorithms.git",
+)
+
+bazel_dep(name = "base64", version = "1.0.0")
+git_override(
+    module_name = "base64",
+    commit = "db1650ba0faacf2443d92680b6aa414b6cc8d848",
+    remote = "https://github.com/jerbdroid/base64.git",
+)
+
+bazel_dep(name = "glm", version = "1.0.0")
+git_override(
+    module_name = "glm",
+    commit = "205a203a26b87f188f9731c023b6052f24a94f02",
+    remote = "https://github.com/jerbdroid/glm.git",
+)
+
+bazel_dep(name = "glfw", version = "3.3.9")
+git_override(
+    module_name = "glfw",
+    commit = "8b77233f736394becaecf903d6d7f5a30510f4da",
+    remote = "https://github.com/jerbdroid/glfw.git",
+)
+
+bazel_dep(name = "spdlog", version = "1.12.0")
+git_override(
+    module_name = "spdlog",
+    commit = "a357ff9ce911fa0d4a772c8312a89828f6b8937b",
+    remote = "https://github.com/jerbdroid/spdlog.git",
+)
+
+bazel_dep(name = "rules_vulkan", version = "0.0.11")
+git_override(
+    module_name = "rules_vulkan",
+    commit = "15ce8a88b2b1901c19d7d4b6a8ebd2deaefc63ae",
+    remote = "https://github.com/jerbdroid/rules_vulkan.git",
+)
+
+bazel_dep(name = "magic_enum", version = "0.9.5")
+git_override(
+    module_name = "magic_enum",
+    commit = "a0ad3684c2e6917000c0a6593a0cfc905b5b80e6",
+    remote = "https://github.com/jerbdroid/magic_enum.git",
+)
+
+bazel_dep(name = "eastl", version = "3.21.23")
+git_override(
+    module_name = "eastl",
+    commit = "6376ce3b8073e5431435077ae9124308b9b5e96e",
+    remote = "https://github.com/jerbdroid/EASTL.git",
+)
+
+bazel_dep(name = "eabase", version = "3.21.23")
+git_override(
+    module_name = "eabase",
+    commit = "819434af2591663845661e77543a5b8f045d4e1c",
+    remote = "https://github.com/jerbdroid/EABase.git",
+)
+
+bazel_dep(name = "fmt", version = "10.2.1")
+git_override(
+    module_name = "fmt",
+    commit = "eb51bd43ab93dc7a3bfa04f76c1806535bc25bbf",
+    remote = "https://github.com/jerbdroid/fmt.git",
+)
+
+bazel_dep(name = "abseil-cpp", version = "20240116.0")
+git_override(
+    module_name = "abseil-cpp",
+    commit = "3735766b3bd68522c8f291675df3fddb4bc3c70d",
+    remote = "https://github.com/jerbdroid/abseil-cpp.git",
+)
+
+# bazel_dep(name = "protobuf", version = "26.0")
+# local_path_override(module_name = "protobuf", path = "modules/protobuf")
+bazel_dep(name = "protobuf", version = "31.0")
+git_override(
+    module_name = "protobuf",
+    commit = "e3bf58820f5d1c5654393afeba7db29110d156e6",
+    remote = "https://github.com/jerbdroid/protobuf.git",
+)
+
+bazel_dep(name = "glslang", version = "14.0.0")
+git_override(
+    module_name = "glslang",
+    commit = "20d608d0e711708437879569b189576ebd2b32ea",
+    remote = "https://github.com/jerbdroid/glslang.git",
+)
+
+bazel_dep(name = "spirv-reflect", version = "1.3.275")
+git_override(
+    module_name = "spirv-reflect",
+    commit = "f0ddde9b026328cc96ff567ce9bf879bdbf27e41",
+    remote = "https://github.com/jerbdroid/SPIRV-Reflect.git",
+)
+
+bazel_dep(name = "imgui", version = "1.90.4")
+git_override(
+    module_name = "imgui",
+    commit = "79ee22febc79127e2292f5655bcaa70d0d31fc08",
+    remote = "https://github.com/jerbdroid/imgui.git",
+)
+
+bazel_dep(name = "com_github_google_flatbuffers", version = "24.3.25")
+git_override(
+    module_name = "com_github_google_flatbuffers",
+    commit = "8929f6359889d42f6fe80b4a8d465b19569e310b",
+    remote = "https://github.com/jerbdroid/flatbuffers.git",
+)
+
+bazel_dep(name = "libzmq", version = "4.3.6")
+git_override(
+    module_name = "libzmq",
+    commit = "e6eadc3572782dfd747381e737f2fa73e0b2f29a",
+    remote = "https://github.com/jerbdroid/libzmq.git",
+)
+
+bazel_dep(name = "readerwriterqueue", version = "1.0.3")
+git_override(
+    module_name = "readerwriterqueue",
+    commit = "5a4962188e5586165f42a9f1b39faaa05142daf8",
+    remote = "https://github.com/jerbdroid/readerwriterqueue.git",
+)
+
+bazel_dep(name = "rules_foreign_cc", version = "0.13.0")
+bazel_dep(name = "rules_proto", version = "6.0.0-rc2")
+bazel_dep(name = "rules_proto_grpc_cpp", version = "5.0.0-alpha2")
+bazel_dep(name = "rules_proto_grpc_python", version = "5.0.0-alpha2")
+bazel_dep(name = "rules_python", version = "0.32.2")
+
+vulkan_ext = use_extension("@rules_vulkan//vulkan:extensions.bzl", "vulkan_ext")
+use_repo(vulkan_ext, "vulkan_windows")
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    configure_coverage_tool = True,
+    # Only set when you have multiple toolchain versions.
+    is_default = True,
+    python_version = "3.11",
+)
+
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+pip.parse(
+    hub_name = "pip",
+    python_version = "3.11",
+    requirements_lock = "//:requirements_lock.txt",
+    requirements_windows = "//:requirements_windows.txt",
+)
+use_repo(pip, "pip")
+
+git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
+
+git_repository(
+    name = "assimp",
+    build_file = "//bazel/third_party:assimp.BUILD.bazel",
+    commit = "31f0dcb4d17d6ef3a4128184c08ccfb388716535",
+    remote = "https://github.com/assimp/assimp.git",
+)
+
+git_repository(
+    name = "stb",
+    build_file = "//bazel/third_party:stb.BUILD.bazel",
+    commit = "5c205738c191bcb0abc65c4febfa9bd25ff35234",
+    remote = "https://github.com/nothings/stb.git",
+)

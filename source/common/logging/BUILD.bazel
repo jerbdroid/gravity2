@@ -1,0 +1,20 @@
+load("//bazel:gravity_build_system.bzl", "gravity_cc_library")
+
+gravity_cc_library(
+    name = "logger",
+    srcs = [
+        # "config.cpp",
+        "logger.cpp",
+    ],
+    hdrs = [
+        # "config.hpp",
+        "logger.hpp",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        # "//api/config:pkg_cc_proto",
+        "//source/common:error",
+        # "//source/common/config",
+        "@spdlog",
+    ],
+)

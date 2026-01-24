@@ -1,0 +1,30 @@
+load("//bazel:gravity_build_system.bzl", "gravity_cc_binary", "gravity_cc_library")
+
+gravity_cc_library(
+    name = "rendering_device",
+    srcs = ["rendering_device.cpp"],
+    hdrs = ["rendering_device.hpp"],
+    visibility = [
+        "//visibility:public",
+    ],
+    deps = [
+        "//source/common/logging:logger",
+        "//source/common/scheduler",
+        "//source/rendering/drivers:rendering_driver",
+        "@boost.asio",
+    ],
+)
+
+gravity_cc_binary(
+    name = "example_rendering_device",
+    srcs = ["example_rendering_device.cpp"],
+    data = [],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":rendering_device",
+        "//source/common/logging:logger",
+        "//source/rendering/contexts/vulkan:vulkan_context",
+        "//source/rendering/drivers/vulkan:vulkan_driver",
+        "//source/platform/window:glfw_window_context",
+    ],
+)

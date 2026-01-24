@@ -1,0 +1,20 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "perfetto",
+    srcs = ["perfetto.cc"],
+    hdrs = ["perfetto.h"],
+    defines = [
+        "WIN32_LEAN_AND_MEAN",
+        "NOMINMAX",
+    ],
+    linkopts = ["/DEFAULTLIB:ws2_32.lib"],
+)
+
+cc_library(
+    name = "trace",
+    srcs = ["trace.cpp"],
+    hdrs = ["trace.hpp"],
+    visibility = ["//visibility:public"],
+    deps = [":perfetto"],
+)

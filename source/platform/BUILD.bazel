@@ -1,0 +1,11 @@
+load("//bazel:gravity_build_system.bzl", "gravity_cc_library")
+
+gravity_cc_library(
+    name = "glfw_context",
+    hdrs = ["glfw_context.hpp"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//source/common/logging:logger",
+        "@glfw",
+    ],
+)

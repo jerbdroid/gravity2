@@ -1,0 +1,70 @@
+@startuml
+skinparam participantPadding 20
+skinparam boxPadding 10
+
+
+box "Game Logic (CPU)" #White
+    participant "Game Setup" as Setup
+    participant "Game Loop" as GameLoop
+end box
+
+box "Gravity Engine (CPU)" #LightBlue
+    participant "Rendering Server" as Server 
+    participant "ENT System" as EntitySystem
+    participant "Resource Manager" as ResourceManager
+    participant "Render Backend" as RenderBackend
+end box
+
+box "GPU Hardware" #LightGray
+    participant "Graphics Queue" as Queue
+    participant "Presentation Engine" as Present
+end box
+
+
+
+== Setup ==
+activate Setup
+Setup -> Server : Initialize()
+activate Server
+Server -> EntitySystem : Initialize()
+activate EntitySystem
+return Ready
+Server-> ResourceManager : Initialize()
+activate ResourceManager
+return Ready
+Server -> RenderBackend : Initialize()
+activate RenderBackend
+RenderBackend -> Queue : Initialize()
+activate Queue
+return Ready
+return Ready
+return Ready
+
+Setup -> Server : LoadAsset(asset)
+activate Server
+Server -> ResourceManager : RequestAsset(asset)
+activate ResourceManager
+
+    note right of ResourceManager
+      1.Determine asset type
+      2.Load from disk or cache
+    end note 
+    ResourceManager -> RenderBackend : CreateGPUResource(assetData)
+    activate RenderBackend
+    RenderBackend -> Queue : UploadToGPU(resource)
+    activate Queue
+    Queue -> Queue : Execute Commands (Async)
+    return 
+    return ResourceHandle
+    ResourceManager -> ResourceManager : CacheResource(resource)
+
+return OK
+return OK
+
+
+deactivate Setup
+
+== State Update ==
+
+== Rendering ==
+

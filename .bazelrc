@@ -1,0 +1,8 @@
+common --enable_bzlmod 
+
+build --cxxopt=/std:c++latest
+build --host_cxxopt=/std:c++latest
+build --cxxopt=/EHsc
+build --local_resources=cpu=HOST_CPUS-2
+build --features=static_link_msvcrt
+build --compiler=clang-cl

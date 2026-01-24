@@ -1,0 +1,15 @@
+load("//bazel:gravity_build_system.bzl", "gravity_cc_library")
+
+gravity_cc_library(
+    name = "utilities",
+    srcs = ["utilities.cpp"],
+    hdrs = ["utilities.hpp"],
+    visibility = ["//visibility:public"],
+)
+
+gravity_cc_library(
+    name = "error",
+    srcs = ["error.cpp"],
+    hdrs = ["error.hpp"],
+    visibility = ["//visibility:public"],
+)

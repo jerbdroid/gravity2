@@ -1,0 +1,1282 @@
+#include "vulkan_context.hpp"
+#include <vector>
+
+#include "GLFW/glfw3.h"
+#include "magic_enum.hpp"
+#include "source/platform/window/window_context.hpp"
+#include "vulkan/vulkan_core.h"
+#include "vulkan/vulkan_enums.hpp"
+#include "vulkan/vulkan_funcs.hpp"
+#include "vulkan/vulkan_handles.hpp"
+#include "vulkan/vulkan_structs.hpp"
+
+#define VMA_IMPLEMENTATION
+#include "vma/vk_mem_alloc.h"
+
+#include <algorithm>
+
+namespace {
+
+struct VulkanEnableLayerExtension {
+  std::span<const char*> layers_;
+  std::span<const char*> extensions_;
+};
+
+auto supported_vulkan_version() -> uint32_t {
+  auto result{ vk::enumerateInstanceVersion() };
+  if (result.result != vk::Result::eSuccess) {
+    return VK_VERSION_1_0;
+  }
+  return result.value;
+}
+
+auto getRequiredInstanceLayers() -> std::unordered_map<std::string, bool> {
+  std::unordered_map<std::string, bool> layers;
+
+#if !defined(NDEBUG)
+  layers["VK_LAYER_KHRONOS_validation"] = true;
+  // layers["VK_LAYER_LUNARG_api_dump"] = true;
+#endif
+
+  return layers;
+}
+
+auto getRequiredInstanceExtensions() -> std::unordered_map<std::string, bool> {
+  uint32_t extension_count{ 0 };
+
+  const auto** glfw_required_extensions{ glfwGetRequiredInstanceExtensions(&extension_count) };
+
+  std::unordered_map<std::string, bool> extensions;
+
+  for (const auto* const extension :
+       std::span<const char*>(glfw_required_extensions, extension_count)) {
+    extensions.emplace(extension, true);
+  }
+
+  // VK_KHR_multiview requires VK_KHR_get_physical_device_properties2.
+  extensions[VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME] = true;
+
+#if !defined(NDEBUG)
+  extensions[VK_EXT_DEBUG_UTILS_EXTENSION_NAME] = true;
+#endif
+
+  return extensions;
+}
+
+VKAPI_ATTR auto VKAPI_CALL debugMessageCallback(
+    VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
+    VkDebugUtilsMessageTypeFlagsEXT message_types,
+    VkDebugUtilsMessengerCallbackDataEXT const* callback_data, void* /*user_data*/) -> VkBool32 {
+
+  auto message = [message_severity, message_types, &callback_data]() {
+    std::ostringstream message;
+
+    message << vk::to_string(
+                   static_cast<vk::DebugUtilsMessageSeverityFlagBitsEXT>(message_severity))
+            << ": " << vk::to_string(static_cast<vk::DebugUtilsMessageTypeFlagsEXT>(message_types))
+            << ":\n";
+    message << std::string("\t") << "messageIDName   = <" << callback_data->pMessageIdName << ">\n";
+    message << std::string("\t") << "messageIdNumber = " << callback_data->messageIdNumber << "\n";
+    message << std::string("\t") << "message         = <" << callback_data->pMessage << ">\n";
+    if (0 < callback_data->queueLabelCount) {
+      message << std::string("\t") << "Queue Labels:\n";
+
+      for (const auto& queue_label : std::span<const VkDebugUtilsLabelEXT>(
+               callback_data->pQueueLabels, callback_data->queueLabelCount)) {
+        message << std::string("\t\t") << "labelName = <" << queue_label.pLabelName << ">\n";
+      }
+    }
+
+    if (0 < callback_data->cmdBufLabelCount) {
+      message << std::string("\t") << "CommandBuffer Labels:\n";
+      for (const auto& cmd_buffer_label : std::span<const VkDebugUtilsLabelEXT>(
+               callback_data->pCmdBufLabels, callback_data->cmdBufLabelCount)) {
+        message << std::string("\t\t") << "labelName = <" << cmd_buffer_label.pLabelName << ">\n";
+      }
+    }
+
+    if (0 < callback_data->objectCount) {
+
+      message << std::string("\t") << "Objects:\n";
+      size_t index = 0;
+      for (const auto& object : std::span<const VkDebugUtilsObjectNameInfoEXT>(
+               callback_data->pObjects, callback_data->objectCount)) {
+        message << std::string("\t\t") << "Object " << index++ << "\n";
+        message << std::string("\t\t\t") << "objectType   = "
+                << vk::to_string(static_cast<vk::ObjectType>(object.objectType)) << "\n";
+        message << std::string("\t\t\t") << "objectHandle = " << object.objectHandle << "\n";
+        if (object.pObjectName != nullptr) {
+          message << std::string("\t\t\t") << "objectName   = <" << object.pObjectName << ">\n";
+        }
+      }
+    }
+
+    return message.str();
+  };
+
+  switch (message_severity) {
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
+      LOG_TRACE(message());
+      break;
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
+      LOG_INFO(message());
+      break;
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+      LOG_WARN(message());
+      break;
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+      LOG_ERROR(message());
+      break;
+    default:
+      LOG_TRACE(message());
+      break;
+  }
+
+  return 0U;
+}
+
+auto getPhysicalDeviceLimitsString(const vk::PhysicalDeviceLimits& limits) -> std::string {
+  std::stringstream string_builder;
+  string_builder << "\n\tmaxImageDimension1D: " << limits.maxImageDimension1D;
+  string_builder << "\n\tmaxImageDimension2D: " << limits.maxImageDimension2D;
+  string_builder << "\n\tmaxImageDimension3D: " << limits.maxImageDimension3D;
+  string_builder << "\n\tmaxImageDimensionCube: " << limits.maxImageDimensionCube;
+  string_builder << "\n\tmaxImageArrayLayers: " << limits.maxImageArrayLayers;
+  string_builder << "\n\tmaxTexelBufferElements: " << limits.maxTexelBufferElements;
+  string_builder << "\n\tmaxUniformBufferRange: " << limits.maxUniformBufferRange;
+  string_builder << "\n\tmaxStorageBufferRange: " << limits.maxStorageBufferRange;
+  string_builder << "\n\tmaxPushConstantsSize: " << limits.maxPushConstantsSize;
+  string_builder << "\n\tmaxMemoryAllocationCount: " << limits.maxMemoryAllocationCount;
+  string_builder << "\n\tmaxSamplerAllocationCount: " << limits.maxSamplerAllocationCount;
+  string_builder << "\n\tbufferImageGranularity: " << limits.bufferImageGranularity;
+  string_builder << "\n\tsparseAddressSpaceSize: " << limits.sparseAddressSpaceSize;
+  string_builder << "\n\tmaxBoundDescriptorSets: " << limits.maxBoundDescriptorSets;
+  string_builder << "\n\tmaxPerStageDescriptorSamplers: " << limits.maxPerStageDescriptorSamplers;
+  string_builder << "\n\tmaxPerStageDescriptorUniformBuffers: "
+                 << limits.maxPerStageDescriptorUniformBuffers;
+  string_builder << "\n\tmaxPerStageDescriptorStorageBuffers: "
+                 << limits.maxPerStageDescriptorStorageBuffers;
+  string_builder << "\n\tmaxPerStageDescriptorSampledImages: "
+                 << limits.maxPerStageDescriptorSampledImages;
+  string_builder << "\n\tmaxPerStageDescriptorStorageImages: "
+                 << limits.maxPerStageDescriptorStorageImages;
+  string_builder << "\n\tmaxPerStageDescriptorInputAttachments: "
+                 << limits.maxPerStageDescriptorInputAttachments;
+  string_builder << "\n\tmaxPerStageResources: " << limits.maxPerStageResources;
+  string_builder << "\n\tmaxDescriptorSetSamplers: " << limits.maxDescriptorSetSamplers;
+  string_builder << "\n\tmaxDescriptorSetUniformBuffers: " << limits.maxDescriptorSetUniformBuffers;
+  string_builder << "\n\tmaxDescriptorSetUniformBuffersDynamic: "
+                 << limits.maxDescriptorSetUniformBuffersDynamic;
+  string_builder << "\n\tmaxDescriptorSetStorageBuffers: " << limits.maxDescriptorSetStorageBuffers;
+  string_builder << "\n\tmaxDescriptorSetStorageBuffersDynamic: "
+                 << limits.maxDescriptorSetStorageBuffersDynamic;
+  string_builder << "\n\tmaxDescriptorSetSampledImages: " << limits.maxDescriptorSetSampledImages;
+  string_builder << "\n\tmaxDescriptorSetStorageImages: " << limits.maxDescriptorSetStorageImages;
+  string_builder << "\n\tmaxDescriptorSetInputAttachments: "
+                 << limits.maxDescriptorSetInputAttachments;
+  string_builder << "\n\tmaxVertexInputAttributes: " << limits.maxVertexInputAttributes;
+  string_builder << "\n\tmaxVertexInputBindings: " << limits.maxVertexInputBindings;
+  string_builder << "\n\tmaxVertexInputAttributeOffset: " << limits.maxVertexInputAttributeOffset;
+  string_builder << "\n\tmaxVertexInputBindingStride: " << limits.maxVertexInputBindingStride;
+  string_builder << "\n\tmaxVertexOutputComponents: " << limits.maxVertexOutputComponents;
+  string_builder << "\n\tmaxTessellationGenerationLevel: " << limits.maxTessellationGenerationLevel;
+  string_builder << "\n\tmaxTessellationPatchSize: " << limits.maxTessellationPatchSize;
+  string_builder << "\n\tmaxTessellationControlPerVertexInputComponents: "
+                 << limits.maxTessellationControlPerVertexInputComponents;
+  string_builder << "\n\tmaxTessellationControlPerVertexOutputComponents: "
+                 << limits.maxTessellationControlPerVertexOutputComponents;
+  string_builder << "\n\tmaxTessellationControlPerPatchOutputComponents: "
+                 << limits.maxTessellationControlPerPatchOutputComponents;
+  string_builder << "\n\tmaxTessellationControlTotalOutputComponents: "
+                 << limits.maxTessellationControlTotalOutputComponents;
+  string_builder << "\n\tmaxTessellationEvaluationInputComponents: "
+                 << limits.maxTessellationEvaluationInputComponents;
+  string_builder << "\n\tmaxTessellationEvaluationOutputComponents: "
+                 << limits.maxTessellationEvaluationOutputComponents;
+  string_builder << "\n\tmaxGeometryShaderInvocations: " << limits.maxGeometryShaderInvocations;
+  string_builder << "\n\tmaxGeometryInputComponents: " << limits.maxGeometryInputComponents;
+  string_builder << "\n\tmaxGeometryOutputComponents: " << limits.maxGeometryOutputComponents;
+  string_builder << "\n\tmaxGeometryOutputVertices: " << limits.maxGeometryOutputVertices;
+  string_builder << "\n\tmaxGeometryTotalOutputComponents: "
+                 << limits.maxGeometryTotalOutputComponents;
+  string_builder << "\n\tmaxFragmentInputComponents: " << limits.maxFragmentInputComponents;
+  string_builder << "\n\tmaxFragmentOutputAttachments: " << limits.maxFragmentOutputAttachments;
+  string_builder << "\n\tmaxFragmentDualSrcAttachments: " << limits.maxFragmentDualSrcAttachments;
+  string_builder << "\n\tmaxFragmentCombinedOutputResources: "
+                 << limits.maxFragmentCombinedOutputResources;
+  string_builder << "\n\tmaxComputeSharedMemorySize: " << limits.maxComputeSharedMemorySize;
+  string_builder << "\n\tmaxComputeWorkGroupCount X: " << limits.maxComputeWorkGroupCount[0];
+  string_builder << "\n\tmaxComputeWorkGroupCount Y: " << limits.maxComputeWorkGroupCount[1];
+  string_builder << "\n\tmaxComputeWorkGroupCount Z: " << limits.maxComputeWorkGroupCount[2];
+  string_builder << "\n\tmaxComputeWorkGroupInvocations: " << limits.maxComputeWorkGroupInvocations;
+  string_builder << "\n\tmaxComputeWorkGroupSize X: " << limits.maxComputeWorkGroupSize[0];
+  string_builder << "\n\tmaxComputeWorkGroupSize Y: " << limits.maxComputeWorkGroupSize[1];
+  string_builder << "\n\tmaxComputeWorkGroupSize Z: " << limits.maxComputeWorkGroupSize[2];
+  string_builder << "\n\tsubPixelPrecisionBits: " << limits.subPixelPrecisionBits;
+  string_builder << "\n\tsubTexelPrecisionBits: " << limits.subTexelPrecisionBits;
+  string_builder << "\n\tmipmapPrecisionBits: " << limits.mipmapPrecisionBits;
+  string_builder << "\n\tmaxDrawIndexedIndexValue: " << limits.maxDrawIndexedIndexValue;
+  string_builder << "\n\tmaxDrawIndirectCount: " << limits.maxDrawIndirectCount;
+  string_builder << "\n\tmaxSamplerLodBias: " << limits.maxSamplerLodBias;
+  string_builder << "\n\tmaxSamplerAnisotropy: " << limits.maxSamplerAnisotropy;
+  string_builder << "\n\tmaxViewports: " << limits.maxViewports;
+  string_builder << "\n\tmaxViewportDimensions X: " << limits.maxViewportDimensions[0];
+  string_builder << "\n\tmaxViewportDimensions Y: " << limits.maxViewportDimensions[1];
+  string_builder << "\n\tviewportBoundsRange Minimum: " << limits.viewportBoundsRange[0];
+  string_builder << "\n\tviewportBoundsRange Maximum: " << limits.viewportBoundsRange[1];
+  string_builder << "\n\tviewportSubPixelBits: " << limits.viewportSubPixelBits;
+  string_builder << "\n\tminMemoryMapAlignment: " << limits.minMemoryMapAlignment;
+  string_builder << "\n\tminTexelBufferOffsetAlignment: " << limits.minTexelBufferOffsetAlignment;
+  string_builder << "\n\tminUniformBufferOffsetAlignment: "
+                 << limits.minUniformBufferOffsetAlignment;
+  string_builder << "\n\tminStorageBufferOffsetAlignment: "
+                 << limits.minStorageBufferOffsetAlignment;
+  string_builder << "\n\tminTexelOffset: " << limits.minTexelOffset;
+  string_builder << "\n\tmaxTexelOffset: " << limits.maxTexelOffset;
+  string_builder << "\n\tminTexelGatherOffset: " << limits.minTexelGatherOffset;
+  string_builder << "\n\tmaxTexelGatherOffset: " << limits.maxTexelGatherOffset;
+  string_builder << "\n\tminInterpolationOffset: " << limits.minInterpolationOffset;
+  string_builder << "\n\tmaxInterpolationOffset: " << limits.maxInterpolationOffset;
+  string_builder << "\n\tsubPixelInterpolationOffsetBits: "
+                 << limits.subPixelInterpolationOffsetBits;
+  string_builder << "\n\tmaxFramebufferWidth: " << limits.maxFramebufferWidth;
+  string_builder << "\n\tmaxFramebufferHeight: " << limits.maxFramebufferHeight;
+  string_builder << "\n\tmaxFramebufferLayers: " << limits.maxFramebufferLayers;
+  /*
+  string_builder << "\n\tframebufferColorSampleCounts: "
+     <<  limits.framebufferColorSampleCounts;
+  string_builder << "\n\tframebufferDepthSampleCounts: "
+     << limits.framebufferDepthSampleCounts;
+  string_builder << "\n\tframebufferStencilSampleCounts: "
+     << limits.framebufferStencilSampleCounts;
+  string_builder << "\n\tframebufferNoAttachmentsSampleCounts: "
+     << limits.framebufferNoAttachmentsSampleCounts;
+  string_builder << "\n\tmaxColorAttachments: " << limits.maxColorAttachments;
+  string_builder << "\n\tsampledImageColorSampleCounts: "
+     << limits.sampledImageColorSampleCounts;
+  string_builder << "\n\tsampledImageIntegerSampleCounts: "
+     << limits.sampledImageIntegerSampleCounts;
+  string_builder << "\n\tsampledImageDepthSampleCounts: "
+     << limits.sampledImageDepthSampleCounts;
+  string_builder << "\n\tsampledImageStencilSampleCounts: "
+     << limits.sampledImageStencilSampleCounts;
+  string_builder << "\n\tstorageImageSampleCounts: " <<
+  limits.storageImageSampleCounts;
+  */
+  string_builder << "\n\tmaxSampleMaskWords: " << limits.maxSampleMaskWords;
+  string_builder << "\n\ttimestampComputeAndGraphics: " << limits.timestampComputeAndGraphics;
+  string_builder << "\n\ttimestampPeriod: " << limits.timestampPeriod;
+  string_builder << "\n\tmaxClipDistances: " << limits.maxClipDistances;
+  string_builder << "\n\tmaxCullDistances: " << limits.maxCullDistances;
+  string_builder << "\n\tmaxCombinedClipAndCullDistances: "
+                 << limits.maxCombinedClipAndCullDistances;
+  string_builder << "\n\tdiscreteQueuePriorities: " << limits.discreteQueuePriorities;
+  string_builder << "\n\tpointSizeRange Minimum: " << limits.pointSizeRange[0];
+  string_builder << "\n\tpointSizeRange Maximum: " << limits.pointSizeRange[1];
+  string_builder << "\n\tlineWidthRange Minimum: " << limits.lineWidthRange[0];
+  string_builder << "\n\tlineWidthRange Maximum: " << limits.lineWidthRange[1];
+  string_builder << "\n\tpointSizeGranularity: " << limits.pointSizeGranularity;
+  string_builder << "\n\tlineWidthGranularity: " << limits.lineWidthGranularity;
+  string_builder << "\n\tstrictLines: " << limits.strictLines;
+  string_builder << "\n\tstandardSampleLocations: " << limits.standardSampleLocations;
+  string_builder << "\n\toptimalBufferCopyOffsetAlignment: "
+                 << limits.optimalBufferCopyOffsetAlignment;
+  string_builder << "\n\toptimalBufferCopyRowPitchAlignment: "
+                 << limits.optimalBufferCopyRowPitchAlignment;
+  string_builder << "\n\tnonCoherentAtomSize: " << limits.nonCoherentAtomSize;
+
+  return string_builder.str();
+}
+
+auto makeInstanceCreateInfoChain(
+    const vk::ApplicationInfo& application_info,
+    VulkanEnableLayerExtension& enabled_layers_extensions)
+    -> vk::StructureChain<vk::InstanceCreateInfo, vk::DebugUtilsMessengerCreateInfoEXT> {
+  vk::DebugUtilsMessageSeverityFlagsEXT severity_flags{
+    vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
+    vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo |
+    vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
+    vk::DebugUtilsMessageSeverityFlagBitsEXT::eError
+  };
+
+  vk::DebugUtilsMessageTypeFlagsEXT message_type_flags{
+    vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
+    vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance |
+    vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation
+  };
+
+  vk::StructureChain<vk::InstanceCreateInfo, vk::DebugUtilsMessengerCreateInfoEXT>
+      instance_create_info{ { {},
+                              &application_info,
+                              enabled_layers_extensions.layers_,
+                              enabled_layers_extensions.extensions_ },
+                            { {}, severity_flags, message_type_flags, &debugMessageCallback } };
+  return instance_create_info;
+}
+
+auto getDeviceRating(vk::PhysicalDevice device, vk::SurfaceKHR surface) -> int32_t {
+  auto device_properties{ device.getProperties() };
+  auto device_features{ device.getFeatures() };
+
+  constexpr int32_t DedicatedGpuScore{ 200 };
+  constexpr int32_t IntegratedGpuScore{ 50 };
+
+  int32_t score{ 0 };
+  if (device_properties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
+    score += DedicatedGpuScore;
+  } else if (device_properties.deviceType == vk::PhysicalDeviceType::eIntegratedGpu) {
+    score += IntegratedGpuScore;
+  } else {
+    return 0;
+  }
+
+  bool surface_is_supported{ false };
+  uint32_t index{ 0 };
+  for (const auto& queue_family : device.getQueueFamilyProperties()) {
+    if (!(queue_family.queueFlags & vk::QueueFlagBits::eGraphics)) {
+      ++index;
+      continue;
+    }
+
+    if (device.getSurfaceSupportKHR(index, surface).value != VK_FALSE) {
+      surface_is_supported = true;
+      break;
+    }
+    ++index;
+  }
+
+  if (!surface_is_supported) {
+    return 0;
+  }
+
+  return score;
+}
+
+void displayPhysicalDeviceProperties(vk::PhysicalDevice device) {
+  const auto& device_properties{ device.getProperties() };
+  std::string device_name{ device_properties.deviceName.data() };
+
+  LOG_INFO(
+      "{}:\n\tvendor_id: {}\n\tdevice_id: {}\n\tdevice_type: "
+      "{}\n\nLimits:{}",
+      device_name, device_properties.vendorID, device_properties.deviceID,
+      magic_enum::enum_name(device_properties.deviceType),
+      getPhysicalDeviceLimitsString(device_properties.limits));
+}
+
+auto findGraphicsQueueFamilyIndex(std::vector<vk::QueueFamilyProperties> queue_family_properties)
+    -> uint32_t {
+  auto graphics_queue_family_property = std::find_if(
+      queue_family_properties.begin(), queue_family_properties.end(),
+      [](const vk::QueueFamilyProperties& queue_family_properties) {
+        return queue_family_properties.queueFlags & vk::QueueFlagBits::eGraphics;
+      });
+
+  assert(graphics_queue_family_property != queue_family_properties.end());
+  return static_cast<uint32_t>(
+      std::distance(queue_family_properties.begin(), graphics_queue_family_property));
+}
+
+auto findGraphicsAndPresentQueueFamilyIndex(vk::PhysicalDevice device, vk::SurfaceKHR surface)
+    -> std::expected<std::pair<uint32_t, uint32_t>, std::error_code> {
+  auto queue_family_properties{ device.getQueueFamilyProperties() };
+  assert(queue_family_properties.size() < std::numeric_limits<uint32_t>::max());
+
+  auto graphics_queue_family_index{ findGraphicsQueueFamilyIndex(queue_family_properties) };
+
+  if (device.getSurfaceSupportKHR(graphics_queue_family_index, surface).value != 0U) {
+    return std::pair<uint32_t, uint32_t>{ graphics_queue_family_index,
+                                          graphics_queue_family_index };
+  }
+
+  for (uint32_t index = 0; index < queue_family_properties.size(); index++) {
+    if (device.getSurfaceSupportKHR(index, surface).value != 0U) {
+      return std::pair<uint32_t, uint32_t>{ graphics_queue_family_index, index };
+    }
+  }
+
+  LOG_ERROR("unable to find graphics and present queues on physical display device");
+  return std::unexpected(gravity::Error::InternalError);
+}
+
+auto getRequiredDeviceExtensions(std::unordered_set<std::string>& enabled_instance_extension)
+    -> std::unordered_map<std::string, bool> {
+  std::unordered_map<std::string, bool> extensions;
+
+  extensions[VK_KHR_SWAPCHAIN_EXTENSION_NAME] = true;
+
+  if (enabled_instance_extension.find(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME) !=
+      enabled_instance_extension.end()) {
+    extensions[VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME] = true;
+    // VK_KHR_create_renderpass2 requires VK_KHR_multiview and
+    // VK_KHR_maintenance2
+    extensions[VK_KHR_MULTIVIEW_EXTENSION_NAME] = true;
+    extensions[VK_KHR_MAINTENANCE_2_EXTENSION_NAME] = true;
+  }
+
+  return extensions;
+}
+
+template <typename T, typename U>
+void enableIfFeature(T& physical_device_features, const U& features) {
+  if (features) {
+    physical_device_features = features;
+  }
+}
+
+auto getRequiredDeviceFeatures(const vk::PhysicalDevice& physical_device)
+    -> vk::PhysicalDeviceFeatures {
+  auto available_device_features{ physical_device.getFeatures() };
+  vk::PhysicalDeviceFeatures device_features;
+
+#define DEVICE_FEATURE_ENABLE_IF(x) enableIfFeature(device_features.x, available_device_features.x)
+
+  DEVICE_FEATURE_ENABLE_IF(fullDrawIndexUint32);
+  // DEVICE_FEATURE_ENABLE_IF(robustBufferAccess);
+  DEVICE_FEATURE_ENABLE_IF(fullDrawIndexUint32);
+  DEVICE_FEATURE_ENABLE_IF(imageCubeArray);
+  DEVICE_FEATURE_ENABLE_IF(independentBlend);
+  DEVICE_FEATURE_ENABLE_IF(geometryShader);
+  DEVICE_FEATURE_ENABLE_IF(tessellationShader);
+  DEVICE_FEATURE_ENABLE_IF(sampleRateShading);
+  DEVICE_FEATURE_ENABLE_IF(dualSrcBlend);
+  DEVICE_FEATURE_ENABLE_IF(logicOp);
+  DEVICE_FEATURE_ENABLE_IF(multiDrawIndirect);
+  DEVICE_FEATURE_ENABLE_IF(drawIndirectFirstInstance);
+  DEVICE_FEATURE_ENABLE_IF(depthClamp);
+  DEVICE_FEATURE_ENABLE_IF(depthBiasClamp);
+  DEVICE_FEATURE_ENABLE_IF(fillModeNonSolid);
+  DEVICE_FEATURE_ENABLE_IF(depthBounds);
+  DEVICE_FEATURE_ENABLE_IF(wideLines);
+  DEVICE_FEATURE_ENABLE_IF(largePoints);
+  DEVICE_FEATURE_ENABLE_IF(alphaToOne);
+  DEVICE_FEATURE_ENABLE_IF(multiViewport);
+  DEVICE_FEATURE_ENABLE_IF(samplerAnisotropy);
+  DEVICE_FEATURE_ENABLE_IF(textureCompressionETC2);
+  DEVICE_FEATURE_ENABLE_IF(textureCompressionASTC_LDR);
+  DEVICE_FEATURE_ENABLE_IF(textureCompressionBC);
+  // DEVICE_FEATURE_ENABLE_IF(occlusionQueryPrecise);
+  // DEVICE_FEATURE_ENABLE_IF(pipelineStatisticsQuery);
+  DEVICE_FEATURE_ENABLE_IF(vertexPipelineStoresAndAtomics);
+  DEVICE_FEATURE_ENABLE_IF(fragmentStoresAndAtomics);
+  DEVICE_FEATURE_ENABLE_IF(shaderTessellationAndGeometryPointSize);
+  DEVICE_FEATURE_ENABLE_IF(shaderImageGatherExtended);
+  DEVICE_FEATURE_ENABLE_IF(shaderStorageImageExtendedFormats);
+  // Intel Arc doesn't support shaderStorageImageMultisample (yet? could be a
+  // driver thing), so it's better for Validation to scream at us if we use it.
+  // Furthermore MSAA Storage is a huge red flag for performance.
+  // DEVICE_FEATURE_ENABLE_IF(shaderStorageImageMultisample);
+  DEVICE_FEATURE_ENABLE_IF(shaderStorageImageReadWithoutFormat);
+  DEVICE_FEATURE_ENABLE_IF(shaderStorageImageWriteWithoutFormat);
+  DEVICE_FEATURE_ENABLE_IF(shaderUniformBufferArrayDynamicIndexing);
+  DEVICE_FEATURE_ENABLE_IF(shaderSampledImageArrayDynamicIndexing);
+  DEVICE_FEATURE_ENABLE_IF(shaderStorageBufferArrayDynamicIndexing);
+  DEVICE_FEATURE_ENABLE_IF(shaderStorageImageArrayDynamicIndexing);
+  DEVICE_FEATURE_ENABLE_IF(shaderClipDistance);
+  DEVICE_FEATURE_ENABLE_IF(shaderCullDistance);
+  DEVICE_FEATURE_ENABLE_IF(shaderFloat64);
+  DEVICE_FEATURE_ENABLE_IF(shaderInt64);
+  DEVICE_FEATURE_ENABLE_IF(shaderInt16);
+  // DEVICE_FEATURE_ENABLE_IF(shaderResourceResidency);
+  DEVICE_FEATURE_ENABLE_IF(shaderResourceMinLod);
+  // We don't use sparse features and enabling them cause extra internal
+  // allocations inside the Vulkan driver we don't need.
+  // DEVICE_FEATURE_ENABLE_IF(sparseBinding);
+  // DEVICE_FEATURE_ENABLE_IF(sparseResidencyBuffer);
+  // DEVICE_FEATURE_ENABLE_IF(sparseResidencyImage2D);
+  // DEVICE_FEATURE_ENABLE_IF(sparseResidencyImage3D);
+  // DEVICE_FEATURE_ENABLE_IF(sparseResidency2Samples);
+  // DEVICE_FEATURE_ENABLE_IF(sparseResidency4Samples);
+  // DEVICE_FEATURE_ENABLE_IF(sparseResidency8Samples);
+  // DEVICE_FEATURE_ENABLE_IF(sparseResidency16Samples);
+  // DEVICE_FEATURE_ENABLE_IF(sparseResidencyAliased);
+  DEVICE_FEATURE_ENABLE_IF(variableMultisampleRate);
+  // DEVICE_FEATURE_ENABLE_IF(inheritedQueries);
+
+#undef DEVICE_FEATURE_ENABLE_IF
+
+  return device_features;
+}
+
+auto pickSurfaceFormat(
+    const std::vector<vk::SurfaceFormatKHR>& supported_surface_formats,
+    const std::vector<vk::Format>& preferred_formats) -> vk::SurfaceFormatKHR {
+  assert(!supported_surface_formats.empty());
+
+  auto picked_format{ supported_surface_formats[0] };
+  auto preferred_color_space{ vk::ColorSpaceKHR::eSrgbNonlinear };
+
+  if (supported_surface_formats.size() == 1) {
+    if (picked_format.format == vk::Format::eUndefined) {
+      picked_format.format = vk::Format::eB8G8R8A8Unorm;
+      picked_format.colorSpace = preferred_color_space;
+    }
+
+    assert(picked_format.colorSpace == preferred_color_space);
+    return picked_format;
+  }
+
+  for (const auto& preferred_format : preferred_formats) {
+    auto format_iterator = std::find_if(
+        supported_surface_formats.begin(), supported_surface_formats.end(),
+        [preferred_format, preferred_color_space](const vk::SurfaceFormatKHR& format) {
+          return (format.format == preferred_format) &&
+                 (format.colorSpace == preferred_color_space);
+        });
+    if (format_iterator != supported_surface_formats.end()) {
+      picked_format = *format_iterator;
+      break;
+    }
+  }
+
+  assert(picked_format.colorSpace == preferred_color_space);
+  return picked_format;
+}
+
+auto computeSwapchainExtent(
+    vk::SurfaceCapabilitiesKHR& surface_capabilities, const gravity::WindowContext& window_handler)
+    -> vk::Extent2D {
+  vk::Extent2D swapchain_extent;
+  if (surface_capabilities.currentExtent.width == std::numeric_limits<uint32_t>::max()) {
+    // If the surface size is undefined, the size is set to the size of the
+    // images requested.
+
+    // TODO
+    // auto window_pixel_extent = window_handler.getPixelExtent();
+    // swapchain_extent.width =
+    //     glm::clamp(window_pixel_extent.width_, surface_capabilities.minImageExtent.width,
+    //                surface_capabilities.maxImageExtent.width);
+    // swapchain_extent.height =
+    //     glm::clamp(window_pixel_extent.height_, surface_capabilities.minImageExtent.height,
+    //                surface_capabilities.maxImageExtent.height);
+  } else {
+    // If the surface size is defined, the swap chain size must match
+    swapchain_extent = surface_capabilities.currentExtent;
+  }
+  return swapchain_extent;
+}
+
+auto pickPresentMode(const std::vector<vk::PresentModeKHR>& present_modes) -> vk::PresentModeKHR {
+  auto picked_mode = vk::PresentModeKHR::eFifo;
+  for (const auto& present_mode : present_modes) {
+    if (present_mode == vk::PresentModeKHR::eMailbox) {
+      picked_mode = present_mode;
+      break;
+    }
+
+    if (present_mode == vk::PresentModeKHR::eImmediate) {
+      picked_mode = present_mode;
+    }
+  }
+  return picked_mode;
+}
+
+}  // namespace
+
+namespace gravity {
+
+using boost::asio::co_spawn;
+using boost::asio::use_awaitable;
+
+VulkanContext::VulkanContext(WindowContext& window_context) : window_context_{ window_context } {}
+
+auto VulkanContext::initialize() -> boost::asio::awaitable<std::error_code> {
+  if (auto error{ co_await initializeVulkanInstance() }; error) {
+    co_return error;
+  }
+
+  if (auto error{ co_await initializeSurface() }; error) {
+    co_return error;
+  }
+
+  if (auto error{ co_await initializePhysicalDevice() }; error) [[unlikely]] {
+    co_return error;
+  }
+
+  if (auto error{ co_await initializeQueueIndex() }; error) {
+    co_return error;
+  }
+
+  if (auto error{ co_await initializeLogicalDevice() }; error) {
+    co_return error;
+  }
+
+  if (auto error{ co_await initializeDynamicDispatcher() }; error) {
+    co_return error;
+  }
+
+  if (auto error{ co_await initializeAllocator() }; error) {
+    co_return error;
+  }
+
+  if (auto error{ co_await initializeDescriptorSetAllocator() }; error) {
+    co_return error;
+  }
+
+  if (auto error{ co_await initializeQueues() }; error) {
+    co_return error;
+  }
+
+  if (auto error{ co_await initializeSynchronization() }; error) {
+    co_return error;
+  }
+
+  if (auto error{ co_await initializeSurfaceFormat() }; error) {
+    co_return error;
+  }
+
+  if (auto error{ co_await initializePrimaryRenderPass() }; error) [[unlikely]] {
+    co_return error;
+  }
+
+  if (auto error{ co_await initializeSwapchain() }; error) [[unlikely]] {
+    co_return error;
+  }
+
+  if (auto error{ co_await initializePipelineCache() }; error) {
+    co_return error;
+  }
+
+  if (auto error{ co_await initializeCommandPool() }; error) {
+    co_return error;
+  }
+
+  if (auto error{ co_await initializeCommandBuffers() }; error) {
+    co_return error;
+  }
+
+  co_return Error::OK;
+}
+
+auto VulkanContext::prepareBuffers() -> boost::asio::awaitable<std::error_code> {
+  constexpr std::chrono::microseconds WaitDuration{ 50 };
+
+  auto executor = co_await boost::asio::this_coro::executor;
+  auto& sync = frames_.at(current_frame_);
+
+  while (device_->waitForFences({ *sync.in_flight_ }, VK_TRUE, 0) == vk::Result::eTimeout) {
+    co_await boost::asio::steady_timer(executor, WaitDuration)
+        .async_wait(boost::asio::use_awaitable);
+  }
+
+  while (true) {
+    auto [result, image_index]{ swapchain_resources_.swapchain_->acquireNextImage(
+        0, *sync.image_available_, nullptr) };
+
+    if (result == vk::Result::eSuccess || result == vk::Result::eSuboptimalKHR) {
+      if (frames_in_flight_[image_index] != nullptr) {
+        while (device_->waitForFences({ *frames_in_flight_[image_index] }, VK_TRUE, 0) ==
+               vk::Result::eTimeout) {
+          co_await boost::asio::steady_timer(executor, WaitDuration)
+              .async_wait(boost::asio::use_awaitable);
+        }
+      }
+      frames_in_flight_[image_index] = &(*sync.in_flight_);
+
+      swapchain_resources_.current_buffer_ = image_index;
+
+      device_->resetFences({ *sync.in_flight_ });
+      sync.command_pool_->reset();
+      sync.command_buffers_.clear();
+
+      co_return Error::OK;
+    }
+
+    if (result == vk::Result::eNotReady) {
+      co_await boost::asio::steady_timer(executor, WaitDuration)
+          .async_wait(boost::asio::use_awaitable);
+      continue;
+    }
+
+    if (result == vk::Result::eErrorOutOfDateKHR) {
+      if (auto error{ co_await updateSwapchain() }; error) {
+        co_return error;
+      }
+      continue;
+    }
+
+    LOG_ERROR("Unexpected Vulkan result: {}", vk::to_string(result));
+    co_return Error::InternalError;
+  }
+}
+
+auto VulkanContext::swapBuffers() -> boost::asio::awaitable<std::error_code> {
+  std::vector<vk::SubmitInfo> submit_info;
+
+  vk::PipelineStageFlags wait_destination_stage_mask{
+    vk::PipelineStageFlagBits::eColorAttachmentOutput
+  };
+
+  auto& sync = frames_.at(current_frame_);
+
+  vk::Semaphore image_available = **sync.image_available_;
+  vk::Semaphore render_finished = **sync.render_finished_;
+
+  std::vector<vk::CommandBuffer> command_buffers{ sync.command_buffers_.begin(),
+                                                  sync.command_buffers_.end() };
+
+  submit_info.emplace_back(
+      image_available, wait_destination_stage_mask, command_buffers, render_finished);
+
+  graphics_queue_->submit(submit_info, *sync.in_flight_);
+
+  vk::SwapchainKHR swapchain = **swapchain_resources_.swapchain_;
+  vk::PresentInfoKHR present_info{ render_finished, swapchain,
+                                   swapchain_resources_.current_buffer_ };
+
+  auto result{ present_queue_->presentKHR(present_info) };
+
+  switch (result) {
+    case vk::Result::eSuccess:
+      break;
+    case vk::Result::eErrorOutOfDateKHR:
+      [[fallthrough]];
+    case vk::Result::eSuboptimalKHR: {
+      if (auto error{ co_await updateSwapchain() }; error) {
+        co_return error;
+      }
+    } break;
+    default:
+      LOG_ERROR("unexpected present result");
+      co_return Error::InternalError;
+  }
+
+  current_frame_ = (current_frame_ + 1) % frames_.size();
+
+  co_return Error::OK;
+}
+
+auto VulkanContext::initializeVulkanInstance() -> boost::asio::awaitable<std::error_code> {
+  if (supported_vulkan_version() < VK_API_VERSION_1_3) {
+    LOG_ERROR("platform does not support vulkan 1.3 and up");
+    co_return Error::InternalError;
+  }
+
+  // const auto& application_config{gravity::ApplicationConfig::getInstance()};
+  // const auto& engine_config{gravity::EngineConfig::getInstance()};
+
+  vk::ApplicationInfo application_info{
+    // application_config.applicationName().c_str(), application_config.applicationVersion(),
+    // engine_config.engineName().c_str(), engine_config.engineVersion(),
+    "Gravity Engine", VK_MAKE_VERSION(0, 1, 0), "Gravity Engine", VK_MAKE_VERSION(0, 1, 0),
+    VK_API_VERSION_1_3
+  };
+
+  auto required_layers{ getRequiredInstanceLayers() };
+
+  auto enumerate_layer_properties{ vk::enumerateInstanceLayerProperties() };
+  if (enumerate_layer_properties.result != vk::Result::eSuccess) {
+    LOG_ERROR("unable to enumerate instance layer properties");
+    co_return Error::InternalError;
+  }
+
+  std::unordered_set<std::string> available_instance_layer_names;
+  for (const auto& available_layer : enumerate_layer_properties.value) {
+    available_instance_layer_names.insert(available_layer.layerName);
+    // TODO(jerbdroid): clang-cl does not build same spdlog as msvc check defines
+    // LOG_INFO(available_layer.description);
+  }
+
+  for (const auto& required_layer : required_layers) {
+    if (available_instance_layer_names.find(required_layer.first) ==
+        available_instance_layer_names.end()) {
+      if (required_layer.second) {
+        LOG_ERROR("required vulkan layer ({}) is not supported", required_layer.first);
+        co_return Error::InternalError;
+      }
+      LOG_WARN("failed to enable a requested vulkan layer ({})", required_layer.first);
+    } else {
+      enabled_instance_layer_names_.insert(required_layer.first);
+    }
+  }
+
+  auto required_extensions{ getRequiredInstanceExtensions() };
+  auto enumerate_extension_properties{ vk::enumerateInstanceExtensionProperties() };
+  if (enumerate_extension_properties.result != vk::Result::eSuccess) {
+    LOG_ERROR("unable to enumerate instance layer properties");
+    co_return Error::InternalError;
+  }
+
+  std::unordered_set<std::string> available_instance_extension_names;
+  for (const auto& available_extension : enumerate_extension_properties.value) {
+    available_instance_extension_names.insert(available_extension.extensionName);
+  }
+
+  for (const auto& required_extension : required_extensions) {
+    if (available_instance_extension_names.find(required_extension.first) ==
+        available_instance_extension_names.end()) {
+      if (required_extension.second) {
+        LOG_ERROR("required vulkan extension ({}) is not supported", required_extension.first);
+        co_return Error::InternalError;
+      }
+      LOG_WARN("failed to enable a requested vulkan extension ({})", required_extension.first);
+    } else {
+      enabled_instance_extension_names_.insert(required_extension.first);
+    }
+  }
+
+  std::vector<const char*> enabled_layers;
+  std::ranges::transform(
+      enabled_instance_layer_names_, std::back_inserter(enabled_layers),
+      [](const std::string& layer) { return layer.c_str(); });
+
+  std::vector<const char*> enabled_extensions;
+  std::ranges::transform(
+      enabled_instance_extension_names_, std::back_inserter(enabled_extensions),
+      [](const std::string& extension) { return extension.c_str(); });
+
+  VulkanEnableLayerExtension enabled_layers_extensions{ .layers_ = enabled_layers,
+                                                        .extensions_ = enabled_extensions };
+  auto [result, instance]{ vk::createInstance(
+      makeInstanceCreateInfoChain(application_info, enabled_layers_extensions)
+          .get<vk::InstanceCreateInfo>()) };
+
+  if (result != vk::Result::eSuccess) {
+    LOG_ERROR("unable to create vulkan instance");
+    co_return Error::InternalError;
+  }
+
+  instance_.emplace(vk::raii::Instance{ vk_context_, instance });
+
+  co_return Error::OK;
+}
+
+auto VulkanContext::initializeSurface() -> boost::asio::awaitable<std::error_code> {
+
+  vk::SurfaceKHR surface;
+
+  if (auto error{
+          window_context_.getRenderingSurface(RenderingApi::Vulkan, **instance_, &surface) };
+      error) {
+    LOG_ERROR("unable to create vulkan window surface");
+    co_return Error::InternalError;
+  }
+
+  surface_.emplace(vk::raii::SurfaceKHR{ *instance_, surface });
+
+  co_return Error::OK;
+}
+
+auto VulkanContext::initializePhysicalDevice() -> boost::asio::awaitable<std::error_code> {
+  std::multimap<int32_t, vk::PhysicalDevice> device_candidates;
+  for (const auto& device : instance_->enumeratePhysicalDevices().value()) {
+    auto device_score{ getDeviceRating(device, *surface_) };
+    device_candidates.emplace(device_score, device);
+
+#if !defined(NDEBUG)
+    displayPhysicalDeviceProperties(device);
+#endif
+  }
+
+  const auto& optimal_device_iter{ device_candidates.rbegin() };
+
+  if (optimal_device_iter == device_candidates.rend() || optimal_device_iter->first <= 0) {
+    LOG_ERROR("unable to find a physical display device");
+    co_return Error::InternalError;
+  }
+  physical_device_.emplace(*instance_, optimal_device_iter->second);
+
+  co_return Error::OK;
+}
+
+auto VulkanContext::initializeQueueIndex() -> boost::asio::awaitable<std::error_code> {
+  if (auto result{ findGraphicsAndPresentQueueFamilyIndex(*physical_device_, *surface_) };
+      result.has_value()) {
+    graphics_family_queue_index_ = result.value().first;
+    present_family_queue_index_ = result.value().second;
+  } else {
+    co_return result.error();
+  }
+  co_return Error::OK;
+}
+
+auto VulkanContext::initializeLogicalDevice() -> boost::asio::awaitable<std::error_code> {
+  auto queue_priority{ 0.0F };
+  std::vector<vk::DeviceQueueCreateInfo> device_queue_create_info;
+
+  device_queue_create_info.emplace_back(
+      vk::DeviceQueueCreateInfo({}, graphics_family_queue_index_, 1, &queue_priority));
+
+  if (separate_queues_) {
+    device_queue_create_info.emplace_back(
+        vk::DeviceQueueCreateInfo({}, present_family_queue_index_, 1, &queue_priority));
+  }
+
+  auto enumerate_extension_properties{ physical_device_->enumerateDeviceExtensionProperties() };
+
+  std::unordered_set<std::string> available_device_extension_names;
+  for (const auto& available_extension : enumerate_extension_properties) {
+    available_device_extension_names.insert(available_extension.extensionName);
+  }
+
+  auto required_extensions{ getRequiredDeviceExtensions(enabled_instance_extension_names_) };
+  for (const auto& required_extension : required_extensions) {
+    if (available_device_extension_names.find(required_extension.first) ==
+        available_device_extension_names.end()) {
+      if (required_extension.second) {
+        LOG_ERROR(
+            "required vulkan device extension ({}) is not supported", required_extension.first);
+        co_return Error::InternalError;
+      }
+      LOG_WARN(
+          "failed to enable a requested vulkan device extension ({})", required_extension.first);
+    } else {
+      enabled_device_extension_names_.insert(required_extension.first);
+    }
+  }
+
+  std::vector<const char*> enabled_extensions;
+  std::ranges::transform(
+      enabled_device_extension_names_, std::back_inserter(enabled_extensions),
+      [](const std::string& extension) { return extension.c_str(); });
+
+  const auto device_features{ getRequiredDeviceFeatures(**physical_device_) };
+
+  vk::DeviceCreateInfo device_create_info(
+      {}, device_queue_create_info, {}, enabled_extensions, &device_features, nullptr);
+
+  auto deviceExpect = physical_device_->createDevice(device_create_info);
+
+  if (deviceExpect) {
+    device_ = std::move(*deviceExpect);
+    co_return Error::OK;
+  }
+
+  LOG_ERROR(
+      "failed to create logical device, vk error: {}", magic_enum::enum_name(deviceExpect.error()));
+
+  co_return Error::InternalError;
+}
+
+auto VulkanContext::initializeDynamicDispatcher() -> boost::asio::awaitable<std::error_code> {
+  // dynamic_dispatcher_.init(**instance_, vkGetInstanceProcAddr, **device_);
+  co_return Error::OK;
+}
+
+auto VulkanContext::initializeAllocator() -> boost::asio::awaitable<std::error_code> {
+  VmaAllocatorCreateInfo allocator_create_info{};
+  allocator_create_info.physicalDevice = **physical_device_;
+  allocator_create_info.device = **device_;
+  allocator_create_info.instance = **instance_;
+  if (vmaCreateAllocator(&allocator_create_info, &memory_allocator_) != VkResult::VK_SUCCESS)
+      [[unlikely]] {
+    LOG_ERROR("unable to create video memory allocator");
+    co_return Error::InternalError;
+  }
+
+  co_return Error::OK;
+}
+
+auto VulkanContext::initializeDescriptorSetAllocator() -> boost::asio::awaitable<std::error_code> {
+  descriptor_allocator_static_ = DescriptorAllocatorPool::create(**device_, 1);
+
+  if (descriptor_allocator_static_ == nullptr) {
+    LOG_ERROR("unable to initialize descriptor set allocator");
+    co_return Error::InternalError;
+  }
+
+  co_return Error::OK;
+}
+
+auto VulkanContext::initializeQueues() -> boost::asio::awaitable<std::error_code> {
+  auto graphics_queue_expect{ device_->getQueue(graphics_family_queue_index_, 0) };
+  if (!graphics_queue_expect) {
+    LOG_ERROR("unable to get graphics queue from logical device");
+    co_return Error::InternalError;
+  }
+  graphics_queue_ = std::move(*graphics_queue_expect);
+
+  auto present_queue_expect{ device_->getQueue(present_family_queue_index_, 0) };
+  if (!present_queue_expect) {
+    LOG_ERROR("unable to get present queue from logical device");
+    co_return Error::InternalError;
+  }
+  present_queue_ = std::move(*present_queue_expect);
+
+  co_return Error::OK;
+}
+
+auto VulkanContext::initializeSynchronization() -> boost::asio::awaitable<std::error_code> {
+  for (auto& frame : frames_) {
+    auto fence_expect{ device_->createFence(
+        vk::FenceCreateInfo(vk::FenceCreateFlagBits::eSignaled)) };
+    if (!fence_expect) {
+      LOG_ERROR("unable to create draw fence");
+      co_return Error::InternalError;
+    }
+    frame.in_flight_ = std::move(*fence_expect);
+
+    auto semaphore_expect{ device_->createSemaphore(vk::SemaphoreCreateInfo()) };
+    if (!semaphore_expect) {
+      LOG_ERROR("unable to create draw complete semaphore");
+      co_return Error::InternalError;
+    }
+    frame.render_finished_ = std::move(*semaphore_expect);
+  }
+
+  co_return Error::OK;
+}
+
+auto VulkanContext::initializeSurfaceFormat() -> boost::asio::awaitable<std::error_code> {
+  auto formats{ physical_device_->getSurfaceFormatsKHR(*surface_) };
+  surface_format_ = pickSurfaceFormat(
+      formats, { vk::Format::eB8G8R8A8Unorm, vk::Format::eR8G8B8A8Unorm, vk::Format::eB8G8R8Unorm,
+                 vk::Format::eR8G8B8Unorm });
+  co_return Error::OK;
+}
+
+auto VulkanContext::initializePrimaryRenderPass() -> boost::asio::awaitable<std::error_code> {
+
+  std::vector<vk::AttachmentDescription2> attachments{ vk::AttachmentDescription2{
+      vk::AttachmentDescriptionFlags(), surface_format_.format, vk::SampleCountFlagBits::e1,
+      vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare,
+      vk::AttachmentStoreOp::eDontCare, vk::ImageLayout::eUndefined,
+      vk::ImageLayout::ePresentSrcKHR } };
+
+  vk::AttachmentReference2 color{ 0, vk::ImageLayout::eColorAttachmentOptimal,
+                                  vk::ImageAspectFlagBits::eColor };
+
+  std::vector<vk::SubpassDescription2> subpass_description;
+
+  std::vector<vk::AttachmentReference2> input_attachments;
+  std::vector<vk::AttachmentReference2> color_attachments;
+  color_attachments.emplace_back(color);
+  std::vector<vk::AttachmentReference2> depth_attachment;
+  std::vector<vk::AttachmentReference2> resolve_attachments;
+  std::vector<uint32_t> preserve_attachments;
+
+  subpass_description.emplace_back(
+      vk::SubpassDescriptionFlags(), vk::PipelineBindPoint::eGraphics, 0, input_attachments,
+      color_attachments, resolve_attachments,
+      depth_attachment.size() > 0 ? depth_attachment.data() : nullptr, preserve_attachments);
+
+  std::vector<vk::SubpassDependency2> subpass_dependencies;
+  subpass_dependencies.emplace_back(
+      ~0U, 0, vk::PipelineStageFlagBits::eColorAttachmentOutput,
+      vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::AccessFlagBits::eNone,
+      vk::AccessFlagBits::eColorAttachmentWrite);
+
+  vk::RenderPassCreateInfo2 render_pass_create_info{
+    vk::RenderPassCreateFlags(), attachments, subpass_description, subpass_dependencies, {}
+  };
+
+  auto render_pass_expect{ device_->createRenderPass2(render_pass_create_info) };
+  if (!render_pass_expect) {
+    LOG_ERROR("unable to create primary render pass");
+    co_return Error::InternalError;
+  }
+
+  render_pass_ = std::move(*render_pass_expect);
+
+  co_return Error::OK;
+}
+
+auto VulkanContext::initializeSwapchain() -> boost::asio::awaitable<std::error_code> {
+
+  while (window_context_.getResolution().width_ == 0 ||
+         window_context_.getResolution().height_ == 0) {
+    window_context_.pollEvents();
+  }
+
+  auto surface_capabilities{ physical_device_->getSurfaceCapabilitiesKHR(*surface_) };
+
+  auto swapchain_extent{ computeSwapchainExtent(surface_capabilities, window_context_) };
+
+  auto pre_transform{ (surface_capabilities.supportedTransforms &
+                       vk::SurfaceTransformFlagBitsKHR::eIdentity)
+                          ? vk::SurfaceTransformFlagBitsKHR::eIdentity
+                          : surface_capabilities.currentTransform };
+
+  auto composite_alpha{
+    (surface_capabilities.supportedCompositeAlpha & vk::CompositeAlphaFlagBitsKHR::ePreMultiplied)
+        ? vk::CompositeAlphaFlagBitsKHR::ePreMultiplied
+    : (surface_capabilities.supportedCompositeAlpha &
+       vk::CompositeAlphaFlagBitsKHR::ePostMultiplied)
+        ? vk::CompositeAlphaFlagBitsKHR::ePostMultiplied
+    : (surface_capabilities.supportedCompositeAlpha & vk::CompositeAlphaFlagBitsKHR::eInherit)
+        ? vk::CompositeAlphaFlagBitsKHR::eInherit
+        : vk::CompositeAlphaFlagBitsKHR::eOpaque
+  };
+
+  auto available_present_mode{ physical_device_->getSurfacePresentModesKHR(*surface_) };
+  auto present_mode{ pickPresentMode(available_present_mode) };
+
+  vk::SwapchainCreateInfoKHR swapchain_create_info(
+      {}, *surface_, surface_capabilities.minImageCount, surface_format_.format,
+      surface_format_.colorSpace, swapchain_extent, 1,
+      { vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc },
+      vk::SharingMode::eExclusive, {}, pre_transform, composite_alpha, present_mode, VK_TRUE,
+      nullptr);
+
+  if (separate_queues_) {
+
+    auto result{ findGraphicsAndPresentQueueFamilyIndex(*physical_device_, *surface_) };
+    if (!result.has_value()) {
+      co_return result.error();
+    }
+
+    auto [graphics_family_queue_index, present_family_queue_index]{ result.value() };
+
+    std::array<uint32_t, 2> queue_family_indicies{ graphics_family_queue_index,
+                                                   present_family_queue_index };
+
+    // If the graphics and present queues are from different queue families, we
+    // either have to explicitly transfer ownership of images between the
+    // queues, or we have to create the swapchain with imageSharingMode as
+    // vk::SharingMode::eConcurrent
+
+    // TODO:
+    // if (vulkanContextConfig.swapchainImageSharing()) {
+    //   swapchain_create_info.imageSharingMode = vk::SharingMode::eConcurrent;
+    //   swapchain_create_info.queueFamilyIndexCount =
+    //       static_cast<uint32_t>(queue_family_indicies.size());
+    //   swapchain_create_info.pQueueFamilyIndices = queue_family_indicies.data();
+    // }
+  }
+
+  auto swapchain_expect{ device_->createSwapchainKHR(swapchain_create_info) };
+  if (!swapchain_expect) {
+    LOG_ERROR("unable to create swapchain");
+    co_return Error::InternalError;
+  }
+
+  swapchain_resources_.swapchain_ = std::move(*swapchain_expect);
+
+  vk::ImageViewCreateInfo image_view_create_info_(
+      {}, {}, vk::ImageViewType::e2D, surface_format_.format, {},
+      { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 });
+
+  for (auto& image : swapchain_resources_.swapchain_->getImages()) {
+    image_view_create_info_.setImage(image);
+    auto image_view_expect{ device_->createImageView(image_view_create_info_) };
+
+    if (!image_view_expect) {
+      LOG_ERROR("unable to create swapchain image view");
+      co_return Error::InternalError;
+    }
+
+    swapchain_resources_.images_.emplace_back(std::move(*image_view_expect));
+  }
+
+  auto window_resolution{ window_context_.getResolution() };
+
+  for (auto& image : swapchain_resources_.images_) {
+    std::vector<vk::ImageView> attachment_image_views{ *image };
+    vk::FramebufferCreateInfo framebuffer_create_info{
+      vk::FramebufferCreateFlags(), *render_pass_,
+      attachment_image_views,       window_resolution.width_,
+      window_resolution.height_,    1
+    };
+
+    auto framebuffer_expect{ device_->createFramebuffer(framebuffer_create_info) };
+
+    if (framebuffer_expect) {
+      swapchain_resources_.framebuffers_.emplace_back(std::move(*framebuffer_expect));
+    } else {
+      LOG_ERROR("unable to create swapchain framebuffers");
+      co_return Error::InternalError;
+    }
+  }
+
+  for (auto& frame : frames_) {
+    if (!frame.image_available_) {
+      continue;
+    }
+
+    auto semaphore_expect{ device_->createSemaphore(vk::SemaphoreCreateInfo()) };
+    if (!semaphore_expect) {
+      LOG_ERROR("unable to create semaphore");
+      co_return Error::InternalError;
+    }
+    frame.image_available_ = std::move(*semaphore_expect);
+  }
+
+  co_return Error::OK;
+}
+
+auto VulkanContext::initializePipelineCache() -> boost::asio::awaitable<std::error_code> {
+  vk::PipelineCacheCreateInfo pipeline_cache_create_Info{};
+
+  auto pipeline_cache_expect{ device_->createPipelineCache(pipeline_cache_create_Info) };
+
+  if (!pipeline_cache_expect) {
+    LOG_ERROR("unable to create pipeline cache");
+    co_return Error::InternalError;
+  }
+
+  pipeline_cache_ = std::move(*pipeline_cache_expect);
+
+  co_return Error::OK;
+}
+
+auto VulkanContext::initializeCommandPool() -> boost::asio::awaitable<std::error_code> {
+  vk::CommandPoolCreateInfo command_pool_create_info{
+    vk::CommandPoolCreateFlagBits::eResetCommandBuffer | vk::CommandPoolCreateFlagBits::eTransient,
+    graphics_family_queue_index_
+  };
+
+  for (auto& frame : frames_) {
+    auto command_pool_expect{ device_->createCommandPool(command_pool_create_info) };
+    if (!command_pool_expect) {
+      LOG_ERROR("unable to create command pool for frame {}", &frame - &frames_.front());
+      co_return Error::InternalError;
+    }
+
+    frame.command_pool_ = std::move(*command_pool_expect);
+  }
+
+  co_return Error::OK;
+}
+
+auto VulkanContext::initializeCommandBuffers() -> boost::asio::awaitable<std::error_code> {
+  for (auto& frame : frames_) {
+    vk::CommandBufferAllocateInfo command_buffer_info{ **frame.command_pool_,
+                                                       vk::CommandBufferLevel::ePrimary, 1 };
+
+    auto command_buffers_expect{ device_->allocateCommandBuffers(command_buffer_info) };
+
+    if (!command_buffers_expect) {
+      LOG_ERROR("unable to allocate command buffers for frame {}", &frame - &frames_.front());
+      co_return Error::InternalError;
+    }
+
+    frame.command_buffers_ = std::move(command_buffers_expect.value());
+  }
+
+  co_return Error::OK;
+}
+
+auto VulkanContext::updateSwapchain() -> boost::asio::awaitable<std::error_code> {
+  co_await sync();
+
+  cleanupSwapchain();
+  cleanupRenderPass();
+
+  if (auto error{ co_await initializePrimaryRenderPass() }; error) {
+    co_return error;
+  }
+
+  if (auto error{ co_await initializeSwapchain() }; error) {
+    co_return error;
+  }
+
+  co_return Error::OK;
+}
+
+void VulkanContext::cleanupSwapchain() {
+  swapchain_resources_.framebuffers_.clear();
+
+  swapchain_resources_.images_.clear();
+
+  swapchain_resources_.swapchain_.reset();
+}
+
+void VulkanContext::cleanupRenderPass() {
+  render_pass_.reset();
+}
+
+auto VulkanContext::sync() -> boost::asio::awaitable<void> {
+  device_->waitIdle();
+}
+
+}  // namespace gravity

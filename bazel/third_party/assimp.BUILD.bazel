@@ -1,0 +1,49 @@
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "opt_build",
+    values = {"compilation_mode": "opt"},
+)
+
+config_setting(
+    name = "dbg_build",
+    values = {"compilation_mode": "dbg"},
+)
+
+config_setting(
+    name = "fast_build",
+    values = {"compilation_mode": "fastbuild"},
+)
+
+cmake(
+    name = "assimp",
+    cache_entries = {
+        "ASSIMP_WARNINGS_AS_ERRORS": "OFF",
+        "BUILD_SHARED_LIBS": "OFF",
+        "USE_STATIC_CRT": "ON",
+        "ASSIMP_INSTALL_PDB": "OFF",
+    },
+    lib_source = ":all_srcs",
+    out_static_libs = select({
+        ":opt_build": [
+            "assimp-vc143-mt.lib",
+            "zlibstatic.lib",
+        ],
+        ":fast_build": [
+            "assimp-vc143-mt.lib",
+            "zlibstatic.lib",
+        ],
+        ":dbg_build": [
+            "assimp-vc143-mtd.lib",
+            "zlibstaticd.lib",
+        ],
+    }),
+)

@@ -1,0 +1,27 @@
+load("//bazel:gravity_build_system.bzl", "gravity_cc_binary", "gravity_cc_library")
+
+gravity_cc_library(
+    name = "event_loop_dispatcher",
+    # srcs = ["dispatcher.cpp"],
+    hdrs = ["event_loop.hpp"],
+    visibility = [
+        "//visibility:public",
+    ],
+    deps = ["//source/common:utilities"],
+)
+
+gravity_cc_binary(
+    name = "main",
+    srcs = ["event_loop_main.cpp"],
+    data = [],
+    # defines = [
+    #     "BOOST_ASIO_NO_EXCEPTIONS",
+    #     "BOOST_NO_EXCEPTIONS",
+    # ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//source/common/scheduler",
+        "//source/common/scheduler:executors",
+        "@boost.asio",
+    ],
+)

@@ -1,0 +1,15 @@
+load("//bazel:gravity_build_system.bzl", "gravity_cc_library")
+
+gravity_cc_library(
+    name = "scheduler",
+    hdrs = ["scheduler.hpp"],
+    visibility = [
+        "//visibility:public",
+    ],
+    deps = [
+        "//source/common:utilities",
+        "//source/common/logging:logger",
+        "@abseil-cpp//absl/strings",
+        "@boost.asio",
+    ],
+)

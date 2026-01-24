@@ -1,0 +1,16 @@
+load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
+
+alias(
+    name = "main",
+    actual = "//source:main",
+)
+
+refresh_compile_commands(
+    name = "refresh_compile_commands",
+    targets = {
+        "//:main": "--compiler=clang-cl",
+        "//source/common/event:main": "--compiler=clang-cl",
+        "//source/servers/rendering:example_rendering_server": "--compiler=clang-cl",
+        "//source/rendering/device:example_rendering_device": "--compiler=clang-cl",
+    },
+)

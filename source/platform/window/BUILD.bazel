@@ -1,0 +1,19 @@
+load("//bazel:gravity_build_system.bzl", "gravity_cc_library")
+
+gravity_cc_library(
+    name = "glfw_window_context",
+    srcs = ["glfw_window_context.cpp"],
+    hdrs = [
+        "glfw_window_context.hpp",
+        "window_context.hpp",
+    ],
+    visibility = [
+        "//visibility:public",
+    ],
+    deps = [
+        "//source/common:error",
+        "//source/platform:glfw_context",
+        "//source/rendering/common:rendering_api",
+        "@vulkan_windows//:vulkan_cc_library",
+    ],
+)

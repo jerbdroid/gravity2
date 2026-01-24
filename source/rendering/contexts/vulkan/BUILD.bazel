@@ -1,0 +1,35 @@
+load("//bazel:gravity_build_system.bzl", "gravity_cc_library")
+
+gravity_cc_library(
+    name = "vulkan_context",
+    srcs = ["vulkan_context.cpp"],
+    hdrs = ["vulkan_context.hpp"],
+    visibility = [
+        "//visibility:public",
+        #"//source/rendering/context:__pkg__"
+    ],
+    deps = [
+        # ":config",
+        ":descriptor_allocator",
+        # "//source/common:assert",
+        # "//source/common:compiler",
+        # "//source/rendering/context:rendering_context_interface",
+        # "//source/rendering/drivers:rendering_driver",
+        # "//source/rendering/drivers/vulkan:vulkan_driver_interface",
+        # "//source/rendering/shaders/spirv:compiler",
+        # "@glfw",
+        # "@glm",
+        "@magic_enum",
+        # "@spdlog",
+        "//source/common/scheduler",
+        "@vulkan_windows//:vulkan_cc_library",
+        "//source/platform/window:glfw_window_context",
+    ],
+)
+
+gravity_cc_library(
+    name = "descriptor_allocator",
+    srcs = ["descriptor_allocator.cpp"],
+    hdrs = ["descriptor_allocator.hpp"],
+    deps = ["@vulkan_windows//:vulkan_cc_library"],
+)

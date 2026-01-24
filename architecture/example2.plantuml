@@ -1,0 +1,86 @@
+@startuml
+skinparam participantPadding 20
+skinparam boxPadding 10
+
+    box "Game Logic (CPU)" #White
+        participant "Game Loop" as Game
+    end box
+
+box "Vulkan Backend (CPU)" #LightBlue
+    participant "Renderer Backend" as Backend
+    participant "Command Buffer" as Cmd
+    participant "Swapchain" as Swap
+end box
+
+box "GPU Hardware" #LightGray
+    participant "Graphics Queue" as Queue
+    participant "Presentation Engine" as Present
+end box
+
+== Frame Start ==
+
+activate Game
+Game -> Backend : BeginFrame()
+activate Backend
+
+    note right of Backend
+      1. Wait for Fence (Frame N-1 finished?)
+      2. Reset Command Pool
+    end note
+    
+Backend -> Swap : AcquireNextImage(ImageAvailableSemaphore)
+activate Swap
+Swap -> Present : Request Image
+return ImageIndex
+return ImageIndex
+
+Backend -> Cmd : BeginRecording()
+activate Cmd
+return
+
+return ReadyToRecord
+
+== Rendering ==
+
+Game -> Backend : DrawScene(SceneData)
+activate Backend
+    
+    note right of Backend
+      Iterate entities, 
+      Bind Pipelines, 
+      Update Descriptors
+    end note
+
+    Backend -> Cmd : BindPipeline()
+    Backend -> Cmd : BindDescriptorSets()
+    Backend -> Cmd : DrawIndexed()
+
+return
+
+== Frame End ==
+
+Game -> Backend : EndFrame()
+activate Backend
+
+    Backend -> Cmd : EndRecording()
+    
+    note right of Backend
+      **Synchronization:**
+      Wait: ImageAvailableSemaphore
+      Signal: RenderFinishedSemaphore
+    end note
+
+    Backend -> Queue : Submit(CmdBuffer, Semaphores, Fence)
+    activate Queue
+    Queue -> Queue : Execute Commands (Async)
+    return
+
+    Backend -> Swap : Present(ImageIndex, RenderFinishedSemaphore)
+    activate Swap
+    Swap -> Present : Queue Present
+    return
+
+return Frame Complete
+deactivate Game
+
+@enduml

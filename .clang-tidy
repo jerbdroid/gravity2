@@ -1,0 +1,21 @@
+Checks: >
+  -*,
+  readability-*,
+  modernize-*,
+  performance-*,
+  -llvmlibc-*,
+  -fuchsia-*,
+  -altera-*,
+  -cppcoreguidelines-pro-type-union-access,
+  -hicpp-signed-bitwise,
+  -bugprone-lambda-function-name,
+  -typecheck_nonviable_condition,
+  -readability-function-cognitive-complexity
+
+# HeaderFilterRegex: ".*"
+FormatStyle: llvm
+CheckOptions:
+  - key: cppcoreguidelines-avoid-do-while.IgnoreMacros
+    value: true
+  - key: hicpp-signed-bitwise.IgnorePositiveIntegerLiterals
+    value: true

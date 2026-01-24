@@ -1,0 +1,107 @@
+@startuml
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+
+package "Core Context" {
+    class GraphicsContext {
+        + Init()
+        + SwapBuffers()
+        + GetCurrentFrameIndex() : uint
+        - m_Instance : VkInstance
+        - m_Surface : VkSurfaceKHR
+    }
+
+    class VulkanDevice {
+        + GetPhysical() : VkPhysicalDevice
+        + GetLogical() : VkDevice
+        + GetGraphicsQueue() : VkQueue
+        + WaitIdle()
+    }
+    
+    class Swapchain {
+        + Create(width, height)
+        + AcquireNextImage(semaphore)
+        + Present(semaphore)
+        + GetFramebuffers() : List<VkFramebuffer>
+        + GetRenderPass() : VkRenderPass
+    }
+}
+
+package "Command Recording" {
+    class CommandPool {
+        + AllocateBuffer() : CommandBuffer
+        + Reset()
+    }
+
+    class CommandBuffer {
+        + Begin()
+        + End()
+        + BeginRenderPass(renderPass, frameBuffer)
+        + BindPipeline(pipeline)
+        + BindVertexBuffer(buffer)
+        + BindIndexBuffer(buffer)
+        + DrawIndexed(count)
+        + Dispatch(x, y, z)
+        - m_Handle : VkCommandBuffer
+    }
+
+    class RendererBackend {
+        + BeginFrame()
+        + EndFrame()
+        + Submit(cmdBuffer)
+        - m_CommandBuffers : List<CommandBuffer>[FramesInFlight]
+    }
+}
+
+package "Pipeline & Resources" {
+    class Pipeline {
+        + Bind(cmdBuffer)
+        {static} + Create(spec : PipelineSpecification)
+        - m_PipelineLayout : VkPipelineLayout
+        - m_Pipeline : VkPipeline
+    }
+    
+    class PipelineSpecification {
+        + Shader : ShaderModule
+        + Layout : BufferLayout
+        + Topology : DrawType
+        + DepthTest : bool
+    }
+
+    class UniformBuffer {
+        + SetData(data, size, offset)
+        - m_Buffer : VkBuffer
+        - m_Memory : VkDeviceMemory
+    }
+
+    class DescriptorSet {
+        + SetUniform(binding, buffer)
+        + SetTexture(binding, texture)
+        + Update()
+    }
+}
+
+' Relationships
+GraphicsContext *-- VulkanDevice
+GraphicsContext *-- Swapchain
+RendererBackend ..> Swapchain : presents to
+RendererBackend *-- CommandPool : owns
+CommandPool ..> CommandBuffer : creates
+CommandBuffer ..> Pipeline : binds
+Pipeline *-- PipelineSpecification
+Pipeline ..> DescriptorSet : uses layout
+DescriptorSet o-- UniformBuffer : references
+
+note right of RendererBackend
+  **Synchronization Handling**
+  Manages "Frames in Flight"
+  (Fences & Semaphores)
+end note
+
+note right of DescriptorSet
+  **Resource Binding**
+  Vulkan separates resource binding
+  (Descriptor Sets) from Pipeline state.
+end note
+
+@enduml

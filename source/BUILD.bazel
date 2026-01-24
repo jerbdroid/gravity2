@@ -1,0 +1,10 @@
+load("//bazel:gravity_build_system.bzl", "gravity_cc_binary")
+
+gravity_cc_binary(
+    name = "main",
+    srcs = ["main.cpp"],
+    data = [],
+    visibility = ["//visibility:public"],
+    deps = [
+    ],
+)
