@@ -2,9 +2,9 @@
 
 #include "source/common/logging/logger.hpp"
 #include "source/common/scheduler/scheduler.hpp"
-#include "source/platform/window/glfw_window_context.hpp"
-#include "source/rendering/contexts/vulkan/vulkan_context.hpp"
-#include "source/rendering/drivers/vulkan/vulkan_driver.hpp"
+#include "source/platform/window/glfw_window_context.hpp" 
+#include "source/rendering/device/vulkan/vulkan_rendering_device.hpp"
+
 
 using namespace gravity;
 using boost::asio::steady_timer;
@@ -27,7 +27,7 @@ auto main() -> int {
     return err.value();
   }
 
-  VulkanContext vulkan_context{window_context, scheduler.makeStrands<VulkanContext>()};
+  VulkanRenderingDevice vulkan_context{ window_context, scheduler.makeStrands<VulkanRenderingDevice>() };
   auto future =
       co_spawn(scheduler.mainExecutor(), vulkan_context.initialize(), boost::asio::use_future);
   future.wait();
@@ -36,9 +36,9 @@ auto main() -> int {
     return err.value();
   }
 
-  VulkanRenderingDriver vulkan_driver{vulkan_context,
-                                      scheduler.makeStrands<VulkanRenderingDriver>()};
-  RenderingDevice device{vulkan_driver, scheduler.makeStrands<RenderingDevice>()};
+  VulkanRenderingBackend vulkan_backend{ vulkan_context,
+                                         scheduler.makeStrands<VulkanRenderingBackend>() };
+  RenderingDevice device{ vulkan_backend, scheduler.makeStrands<RenderingDevice>() };
 
   future = co_spawn(scheduler.mainExecutor(), device.initialize(), boost::asio::use_future);
 

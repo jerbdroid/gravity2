@@ -1,5 +1,7 @@
 #pragma once
 
+#include "source/rendering/device/rendering_device.hpp"
+
 #include "descriptor_allocator.hpp"
 
 #include "source/common/scheduler/scheduler.hpp"
@@ -41,12 +43,12 @@ struct ImageData {
   }
 };
 
-class VulkanContext {
+class VulkanRenderingDevice : public RenderingDevice {
  public:
-  ~VulkanContext() = default;
-  VulkanContext(WindowContext& window_context);
+  ~VulkanRenderingDevice() = default;
+  VulkanRenderingDevice(WindowContext& window_context);
 
-  auto initialize() -> boost::asio::awaitable<std::error_code>;
+  auto initialize() -> boost::asio::awaitable<std::error_code> override;
   auto prepareBuffers() -> boost::asio::awaitable<std::error_code>;
   auto swapBuffers() -> boost::asio::awaitable<std::error_code>;
 

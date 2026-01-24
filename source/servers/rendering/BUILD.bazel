@@ -23,8 +23,7 @@ gravity_cc_binary(
         ":rendering_server",
         "//source/common/logging:logger",
         "//source/platform/window:glfw_window_context",
-        "//source/rendering/contexts/vulkan:vulkan_context",
         "//source/rendering/device:rendering_device",
-        "//source/rendering/drivers/vulkan:vulkan_driver",
+        "//source/rendering/device/vulkan:vulkan_rendering_device", 
     ],
 )

@@ -1,4 +1,5 @@
-#include "vulkan_context.hpp"
+#include "vulkan_rendering_device.hpp"
+
 #include <vector>
 
 #include "GLFW/glfw3.h"
@@ -578,9 +579,10 @@ namespace gravity {
 using boost::asio::co_spawn;
 using boost::asio::use_awaitable;
 
-VulkanContext::VulkanContext(WindowContext& window_context) : window_context_{ window_context } {}
+VulkanRenderingDevice::VulkanRenderingDevice(WindowContext& window_context)
+    : window_context_{ window_context } {}
 
-auto VulkanContext::initialize() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::initialize() -> boost::asio::awaitable<std::error_code> {
   if (auto error{ co_await initializeVulkanInstance() }; error) {
     co_return error;
   }
@@ -648,7 +650,7 @@ auto VulkanContext::initialize() -> boost::asio::awaitable<std::error_code> {
   co_return Error::OK;
 }
 
-auto VulkanContext::prepareBuffers() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::prepareBuffers() -> boost::asio::awaitable<std::error_code> {
   constexpr std::chrono::microseconds WaitDuration{ 50 };
 
   auto executor = co_await boost::asio::this_coro::executor;
@@ -700,7 +702,7 @@ auto VulkanContext::prepareBuffers() -> boost::asio::awaitable<std::error_code> 
   }
 }
 
-auto VulkanContext::swapBuffers() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::swapBuffers() -> boost::asio::awaitable<std::error_code> {
   std::vector<vk::SubmitInfo> submit_info;
 
   vk::PipelineStageFlags wait_destination_stage_mask{
@@ -746,7 +748,7 @@ auto VulkanContext::swapBuffers() -> boost::asio::awaitable<std::error_code> {
   co_return Error::OK;
 }
 
-auto VulkanContext::initializeVulkanInstance() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::initializeVulkanInstance() -> boost::asio::awaitable<std::error_code> {
   if (supported_vulkan_version() < VK_API_VERSION_1_3) {
     LOG_ERROR("platform does not support vulkan 1.3 and up");
     co_return Error::InternalError;
@@ -841,7 +843,7 @@ auto VulkanContext::initializeVulkanInstance() -> boost::asio::awaitable<std::er
   co_return Error::OK;
 }
 
-auto VulkanContext::initializeSurface() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::initializeSurface() -> boost::asio::awaitable<std::error_code> {
 
   vk::SurfaceKHR surface;
 
@@ -857,7 +859,7 @@ auto VulkanContext::initializeSurface() -> boost::asio::awaitable<std::error_cod
   co_return Error::OK;
 }
 
-auto VulkanContext::initializePhysicalDevice() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::initializePhysicalDevice() -> boost::asio::awaitable<std::error_code> {
   std::multimap<int32_t, vk::PhysicalDevice> device_candidates;
   for (const auto& device : instance_->enumeratePhysicalDevices().value()) {
     auto device_score{ getDeviceRating(device, *surface_) };
@@ -879,7 +881,7 @@ auto VulkanContext::initializePhysicalDevice() -> boost::asio::awaitable<std::er
   co_return Error::OK;
 }
 
-auto VulkanContext::initializeQueueIndex() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::initializeQueueIndex() -> boost::asio::awaitable<std::error_code> {
   if (auto result{ findGraphicsAndPresentQueueFamilyIndex(*physical_device_, *surface_) };
       result.has_value()) {
     graphics_family_queue_index_ = result.value().first;
@@ -890,7 +892,7 @@ auto VulkanContext::initializeQueueIndex() -> boost::asio::awaitable<std::error_
   co_return Error::OK;
 }
 
-auto VulkanContext::initializeLogicalDevice() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::initializeLogicalDevice() -> boost::asio::awaitable<std::error_code> {
   auto queue_priority{ 0.0F };
   std::vector<vk::DeviceQueueCreateInfo> device_queue_create_info;
 
@@ -948,12 +950,13 @@ auto VulkanContext::initializeLogicalDevice() -> boost::asio::awaitable<std::err
   co_return Error::InternalError;
 }
 
-auto VulkanContext::initializeDynamicDispatcher() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::initializeDynamicDispatcher()
+    -> boost::asio::awaitable<std::error_code> {
   // dynamic_dispatcher_.init(**instance_, vkGetInstanceProcAddr, **device_);
   co_return Error::OK;
 }
 
-auto VulkanContext::initializeAllocator() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::initializeAllocator() -> boost::asio::awaitable<std::error_code> {
   VmaAllocatorCreateInfo allocator_create_info{};
   allocator_create_info.physicalDevice = **physical_device_;
   allocator_create_info.device = **device_;
@@ -967,7 +970,8 @@ auto VulkanContext::initializeAllocator() -> boost::asio::awaitable<std::error_c
   co_return Error::OK;
 }
 
-auto VulkanContext::initializeDescriptorSetAllocator() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::initializeDescriptorSetAllocator()
+    -> boost::asio::awaitable<std::error_code> {
   descriptor_allocator_static_ = DescriptorAllocatorPool::create(**device_, 1);
 
   if (descriptor_allocator_static_ == nullptr) {
@@ -978,7 +982,7 @@ auto VulkanContext::initializeDescriptorSetAllocator() -> boost::asio::awaitable
   co_return Error::OK;
 }
 
-auto VulkanContext::initializeQueues() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::initializeQueues() -> boost::asio::awaitable<std::error_code> {
   auto graphics_queue_expect{ device_->getQueue(graphics_family_queue_index_, 0) };
   if (!graphics_queue_expect) {
     LOG_ERROR("unable to get graphics queue from logical device");
@@ -996,7 +1000,7 @@ auto VulkanContext::initializeQueues() -> boost::asio::awaitable<std::error_code
   co_return Error::OK;
 }
 
-auto VulkanContext::initializeSynchronization() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::initializeSynchronization() -> boost::asio::awaitable<std::error_code> {
   for (auto& frame : frames_) {
     auto fence_expect{ device_->createFence(
         vk::FenceCreateInfo(vk::FenceCreateFlagBits::eSignaled)) };
@@ -1017,7 +1021,7 @@ auto VulkanContext::initializeSynchronization() -> boost::asio::awaitable<std::e
   co_return Error::OK;
 }
 
-auto VulkanContext::initializeSurfaceFormat() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::initializeSurfaceFormat() -> boost::asio::awaitable<std::error_code> {
   auto formats{ physical_device_->getSurfaceFormatsKHR(*surface_) };
   surface_format_ = pickSurfaceFormat(
       formats, { vk::Format::eB8G8R8A8Unorm, vk::Format::eR8G8B8A8Unorm, vk::Format::eB8G8R8Unorm,
@@ -1025,7 +1029,8 @@ auto VulkanContext::initializeSurfaceFormat() -> boost::asio::awaitable<std::err
   co_return Error::OK;
 }
 
-auto VulkanContext::initializePrimaryRenderPass() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::initializePrimaryRenderPass()
+    -> boost::asio::awaitable<std::error_code> {
 
   std::vector<vk::AttachmentDescription2> attachments{ vk::AttachmentDescription2{
       vk::AttachmentDescriptionFlags(), surface_format_.format, vk::SampleCountFlagBits::e1,
@@ -1071,7 +1076,7 @@ auto VulkanContext::initializePrimaryRenderPass() -> boost::asio::awaitable<std:
   co_return Error::OK;
 }
 
-auto VulkanContext::initializeSwapchain() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::initializeSwapchain() -> boost::asio::awaitable<std::error_code> {
 
   while (window_context_.getResolution().width_ == 0 ||
          window_context_.getResolution().height_ == 0) {
@@ -1126,7 +1131,7 @@ auto VulkanContext::initializeSwapchain() -> boost::asio::awaitable<std::error_c
     // vk::SharingMode::eConcurrent
 
     // TODO:
-    // if (vulkanContextConfig.swapchainImageSharing()) {
+    // if (VulkanRenderingDeviceConfig.swapchainImageSharing()) {
     //   swapchain_create_info.imageSharingMode = vk::SharingMode::eConcurrent;
     //   swapchain_create_info.queueFamilyIndexCount =
     //       static_cast<uint32_t>(queue_family_indicies.size());
@@ -1194,7 +1199,7 @@ auto VulkanContext::initializeSwapchain() -> boost::asio::awaitable<std::error_c
   co_return Error::OK;
 }
 
-auto VulkanContext::initializePipelineCache() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::initializePipelineCache() -> boost::asio::awaitable<std::error_code> {
   vk::PipelineCacheCreateInfo pipeline_cache_create_Info{};
 
   auto pipeline_cache_expect{ device_->createPipelineCache(pipeline_cache_create_Info) };
@@ -1209,7 +1214,7 @@ auto VulkanContext::initializePipelineCache() -> boost::asio::awaitable<std::err
   co_return Error::OK;
 }
 
-auto VulkanContext::initializeCommandPool() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::initializeCommandPool() -> boost::asio::awaitable<std::error_code> {
   vk::CommandPoolCreateInfo command_pool_create_info{
     vk::CommandPoolCreateFlagBits::eResetCommandBuffer | vk::CommandPoolCreateFlagBits::eTransient,
     graphics_family_queue_index_
@@ -1228,7 +1233,7 @@ auto VulkanContext::initializeCommandPool() -> boost::asio::awaitable<std::error
   co_return Error::OK;
 }
 
-auto VulkanContext::initializeCommandBuffers() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::initializeCommandBuffers() -> boost::asio::awaitable<std::error_code> {
   for (auto& frame : frames_) {
     vk::CommandBufferAllocateInfo command_buffer_info{ **frame.command_pool_,
                                                        vk::CommandBufferLevel::ePrimary, 1 };
@@ -1246,7 +1251,7 @@ auto VulkanContext::initializeCommandBuffers() -> boost::asio::awaitable<std::er
   co_return Error::OK;
 }
 
-auto VulkanContext::updateSwapchain() -> boost::asio::awaitable<std::error_code> {
+auto VulkanRenderingDevice::updateSwapchain() -> boost::asio::awaitable<std::error_code> {
   co_await sync();
 
   cleanupSwapchain();
@@ -1263,7 +1268,7 @@ auto VulkanContext::updateSwapchain() -> boost::asio::awaitable<std::error_code>
   co_return Error::OK;
 }
 
-void VulkanContext::cleanupSwapchain() {
+void VulkanRenderingDevice::cleanupSwapchain() {
   swapchain_resources_.framebuffers_.clear();
 
   swapchain_resources_.images_.clear();
@@ -1271,12 +1276,14 @@ void VulkanContext::cleanupSwapchain() {
   swapchain_resources_.swapchain_.reset();
 }
 
-void VulkanContext::cleanupRenderPass() {
+void VulkanRenderingDevice::cleanupRenderPass() {
   render_pass_.reset();
 }
 
-auto VulkanContext::sync() -> boost::asio::awaitable<void> {
+auto VulkanRenderingDevice::sync() -> boost::asio::awaitable<void> {
   device_->waitIdle();
+
+  co_return;
 }
 
 }  // namespace gravity

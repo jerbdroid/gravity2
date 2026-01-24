@@ -9,6 +9,12 @@ _GRAVITY_COMPILATION_DEFINE = {
     "fast": [],
 }
 
+_GRAVITY_COPTS = {
+    "opt": ["-Wno-nullability-completeness", "-Wno-builtin-macro-redefined", "-Wno-macro-redefined"],
+    "dbg": ["-Wno-nullability-completeness", "-Wno-builtin-macro-redefined", "-Wno-macro-redefined"],
+    "fast": ["-Wno-nullability-completeness", "-Wno-builtin-macro-redefined", "-Wno-macro-redefined"],
+}
+
 def calculate_gravity_defines(defines = []):
     return select({
         "//bazel:opt_build": _GRAVITY_COMPILATION_DEFINE["opt"],
@@ -16,18 +22,27 @@ def calculate_gravity_defines(defines = []):
         "//bazel:fast_build": _GRAVITY_COMPILATION_DEFINE["fast"],
     }) + defines
 
-def gravity_cc_library(name, defines = [], deps = [], **kargs):
+def calculate_gravity_copts(copts = []):
+    return select({
+        "//bazel:opt_build": _GRAVITY_COPTS["opt"],
+        "//bazel:dbg_build": _GRAVITY_COPTS["dbg"],
+        "//bazel:fast_build": _GRAVITY_COPTS["fast"],
+    }) + copts
+
+def gravity_cc_library(name, defines = [], deps = [], copts = [], **kargs):
     cc_library(
         name = name,
         defines = calculate_gravity_defines(defines),
+        copts = calculate_gravity_copts(copts),
         deps = deps + ["//source/common/diagnostics:trace"],
         **kargs
     )
 
-def gravity_cc_binary(name, defines = [], deps = [], **kargs):
+def gravity_cc_binary(name, defines = [], deps = [], copts = [], **kargs):
     cc_binary(
         name = name,
         deps = deps + ["//source/common/diagnostics:trace"],
+        copts = calculate_gravity_copts(copts),
         defines = calculate_gravity_defines(defines),
         **kargs
     )
