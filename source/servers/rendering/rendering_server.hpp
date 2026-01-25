@@ -14,7 +14,6 @@ using boost::asio::detached;
 using boost::asio::steady_timer;
 using boost::asio::use_awaitable;
 using namespace std::chrono_literals;
-using namespace gravity;
 
 inline auto task1() -> awaitable<void> {
   auto ex = co_await boost::asio::this_coro::executor;
@@ -33,11 +32,22 @@ class RenderingServer {
   using StrandGroup = StrandGroup<RenderingServer>;
 
   RenderingServer(RenderingDevice& device, StrandGroup strands)
-      : device_{device}, strands_{std::move(strands)} {}
+      : device_{ device }, strands_{ std::move(strands) } {}
 
-  auto draw() { co_spawn(strands_.getStrand(StrandLanes::Main), task1(), detached); }
+  auto draw() {
+    co_spawn(strands_.getStrand(StrandLanes::Main), task1(), detached);
+    co_spawn(strands_.getStrand(StrandLanes::Main), oof(), detached);
+  }
 
   ~RenderingServer() = default;
+
+  auto oof() -> awaitable<void> {
+    BufferDescription description{ .size_ = 100,
+                                   .usage_ = BufferUsage::TransferSource,
+                                   .visibility_ = BufferVisibility::Device };
+    auto handle{ co_await device_.createBuffer(description) };
+    co_await device_.destroyBuffer(handle.value());
+  }
 
  private:
   RenderingDevice& device_;

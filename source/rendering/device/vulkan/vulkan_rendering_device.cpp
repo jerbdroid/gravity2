@@ -1,10 +1,14 @@
 #include "vulkan_rendering_device.hpp"
 
-#include <vector>
+#include "boost/asio/co_spawn.hpp"
+#include "boost/asio/use_awaitable.hpp"
+#include "source/common/logging/logger.hpp"
+#include "source/common/templates/bitmask.hpp"
+#include "source/platform/window/window_context.hpp"
+#include "source/rendering/common/rendering_api.hpp"
 
 #include "GLFW/glfw3.h"
 #include "magic_enum.hpp"
-#include "source/platform/window/window_context.hpp"
 #include "vulkan/vulkan_core.h"
 #include "vulkan/vulkan_enums.hpp"
 #include "vulkan/vulkan_funcs.hpp"
@@ -15,8 +19,15 @@
 #include "vma/vk_mem_alloc.h"
 
 #include <algorithm>
+#include <cassert>
+#include <expected>
+#include <utility>
+#include <vector>
+
 
 namespace {
+
+using namespace gravity;
 
 struct VulkanEnableLayerExtension {
   std::span<const char*> layers_;
@@ -413,6 +424,7 @@ auto getRequiredDeviceExtensions(std::unordered_set<std::string>& enabled_instan
     // VK_KHR_maintenance2
     extensions[VK_KHR_MULTIVIEW_EXTENSION_NAME] = true;
     extensions[VK_KHR_MAINTENANCE_2_EXTENSION_NAME] = true;
+    extensions[VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME] = true;
   }
 
   return extensions;
@@ -425,12 +437,18 @@ void enableIfFeature(T& physical_device_features, const U& features) {
   }
 }
 
-auto getRequiredDeviceFeatures(const vk::PhysicalDevice& physical_device)
-    -> vk::PhysicalDeviceFeatures {
-  auto available_device_features{ physical_device.getFeatures() };
-  vk::PhysicalDeviceFeatures device_features;
+struct DeviceFeaturesWithTimeline {
+  vk::PhysicalDeviceFeatures core_features_;
+  vk::PhysicalDeviceVulkan12Features vulkan_12_features_;
+};
 
-#define DEVICE_FEATURE_ENABLE_IF(x) enableIfFeature(device_features.x, available_device_features.x)
+auto getRequiredDeviceFeatures(const vk::PhysicalDevice& physical_device)
+    -> DeviceFeaturesWithTimeline {
+  auto available_device_features{ physical_device.getFeatures() };
+  DeviceFeaturesWithTimeline device_features;
+
+#define DEVICE_FEATURE_ENABLE_IF(x) \
+  enableIfFeature(device_features.core_features_.x, available_device_features.x)
 
   DEVICE_FEATURE_ENABLE_IF(fullDrawIndexUint32);
   // DEVICE_FEATURE_ENABLE_IF(robustBufferAccess);
@@ -495,6 +513,22 @@ auto getRequiredDeviceFeatures(const vk::PhysicalDevice& physical_device)
   // DEVICE_FEATURE_ENABLE_IF(inheritedQueries);
 
 #undef DEVICE_FEATURE_ENABLE_IF
+
+  // Query Vulkan 1.2 features (including timelineSemaphore)
+
+  device_features.vulkan_12_features_.sType = vk::StructureType::ePhysicalDeviceVulkan12Features;
+
+  // Vulkan-Hpp requires you to use getFeatures2 for extended features
+  vk::PhysicalDeviceFeatures2 features{};
+  features.pNext = &device_features.vulkan_12_features_;
+  physical_device.getFeatures2(&features);
+
+  // Enable timelineSemaphore only if supported
+  if (device_features.vulkan_12_features_.timelineSemaphore != 0U) {
+    device_features.vulkan_12_features_.timelineSemaphore = VK_TRUE;
+  } else {
+    LOG_WARN("timelineSemaphore feature not supported by this device");
+  }
 
   return device_features;
 }
@@ -572,6 +606,40 @@ auto pickPresentMode(const std::vector<vk::PresentModeKHR>& present_modes) -> vk
   return picked_mode;
 }
 
+auto toVulkan(BufferUsage usage) -> VkBufferUsageFlags {
+  VkBufferUsageFlags flags{};
+
+  if (has_flag(usage, BufferUsage::TransferSource)) {
+    flags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+  }
+  if (has_flag(usage, BufferUsage::TransferDestination)) {
+    flags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  }
+  if (has_flag(usage, BufferUsage::ReadOnlyTexel)) {
+    flags |= VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
+  }
+  if (has_flag(usage, BufferUsage::ReadWriteTexel)) {
+    flags |= VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
+  }
+  if (has_flag(usage, BufferUsage::ReadOnly)) {
+    flags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+  }
+  if (has_flag(usage, BufferUsage::ReadWrite)) {
+    flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+  }
+  if (has_flag(usage, BufferUsage::Index)) {
+    flags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+  }
+  if (has_flag(usage, BufferUsage::Vertex)) {
+    flags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+  }
+  if (has_flag(usage, BufferUsage::Indirect)) {
+    flags |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+  }
+
+  return flags;
+}
+
 }  // namespace
 
 namespace gravity {
@@ -579,10 +647,154 @@ namespace gravity {
 using boost::asio::co_spawn;
 using boost::asio::use_awaitable;
 
-VulkanRenderingDevice::VulkanRenderingDevice(WindowContext& window_context)
-    : window_context_{ window_context } {}
+VulkanRenderingDevice::~VulkanRenderingDevice() {
+  sync();
+
+  for (auto& buffer : buffers_) {
+    if (buffer.alive_) {
+      vmaDestroyBuffer(memory_allocator_, buffer.buffer_.buffer_, buffer.buffer_.allocation_);
+    }
+  }
+
+  for (auto& pending_destroy_buffer : pending_destroy_buffers_) {
+    vmaDestroyBuffer(
+        memory_allocator_, pending_destroy_buffer.buffer_.buffer_,
+        pending_destroy_buffer.buffer_.allocation_);
+  }
+
+  vmaDestroyAllocator(memory_allocator_);
+}
+
+VulkanRenderingDevice::VulkanRenderingDevice(WindowContext& window_context, StrandGroup strands)
+    : window_context_{ window_context }, strands_{ std::move(strands) } {}
 
 auto VulkanRenderingDevice::initialize() -> boost::asio::awaitable<std::error_code> {
+  co_return co_await co_spawn(
+      strands_.getStrand(StrandLanes::Initialize), doInitialize(), boost::asio::use_awaitable);
+}
+
+auto VulkanRenderingDevice::prepareBuffers() -> boost::asio::awaitable<std::error_code> {
+  constexpr std::chrono::microseconds WaitDuration{ 50 };
+
+  auto executor = co_await boost::asio::this_coro::executor;
+  auto& sync = frames_.at(current_frame_);
+
+  while (device_->waitForFences({ *sync.in_flight_ }, VK_TRUE, 0) == vk::Result::eTimeout) {
+    co_await boost::asio::steady_timer(executor, WaitDuration)
+        .async_wait(boost::asio::use_awaitable);
+  }
+
+  while (true) {
+    auto [result, image_index]{ swapchain_resources_.swapchain_->acquireNextImage(
+        0, *sync.image_available_, nullptr) };
+
+    if (result == vk::Result::eSuccess || result == vk::Result::eSuboptimalKHR) {
+      if (frames_in_flight_[image_index] != nullptr) {
+        while (device_->waitForFences({ *frames_in_flight_[image_index] }, VK_TRUE, 0) ==
+               vk::Result::eTimeout) {
+          co_await boost::asio::steady_timer(executor, WaitDuration)
+              .async_wait(boost::asio::use_awaitable);
+        }
+      }
+      frames_in_flight_[image_index] = &(*sync.in_flight_);
+
+      swapchain_resources_.current_buffer_ = image_index;
+
+      device_->resetFences({ *sync.in_flight_ });
+      sync.command_pool_->reset();
+      sync.command_buffers_.clear();
+
+      co_return Error::OK;
+    }
+
+    if (result == vk::Result::eNotReady) {
+      co_await boost::asio::steady_timer(executor, WaitDuration)
+          .async_wait(boost::asio::use_awaitable);
+      continue;
+    }
+
+    if (result == vk::Result::eErrorOutOfDateKHR) {
+      if (auto error{ co_await updateSwapchain() }; error) {
+        co_return error;
+      }
+      continue;
+    }
+
+    LOG_ERROR("Unexpected Vulkan result: {}", vk::to_string(result));
+    co_return Error::InternalError;
+  }
+}
+
+auto VulkanRenderingDevice::swapBuffers() -> boost::asio::awaitable<std::error_code> {
+  std::vector<vk::SubmitInfo> submit_info_list;
+
+  vk::PipelineStageFlags wait_destination_stage_mask{
+    vk::PipelineStageFlagBits::eColorAttachmentOutput
+  };
+
+  auto& sync = frames_.at(current_frame_);
+
+  vk::Semaphore image_available = **sync.image_available_;
+  vk::Semaphore render_finished = **sync.render_finished_;
+  vk::Semaphore timeline_semaphore = **timeline_semaphore_;
+
+  std::vector<vk::CommandBuffer> command_buffers{ sync.command_buffers_.begin(),
+                                                  sync.command_buffers_.end() };
+
+  auto& submit_info{ submit_info_list.emplace_back(
+      image_available, wait_destination_stage_mask, command_buffers, render_finished) };
+
+  vk::TimelineSemaphoreSubmitInfo timeline_submit_info{ 0, nullptr, 1, &timeline_value_ };
+
+  submit_info.pNext = &timeline_submit_info;
+  submit_info.signalSemaphoreCount = 1;
+  submit_info.pSignalSemaphores = &timeline_semaphore;
+
+  graphics_queue_->submit(submit_info, *sync.in_flight_);
+
+  ++timeline_value_;
+
+  vk::SwapchainKHR swapchain = **swapchain_resources_.swapchain_;
+  vk::PresentInfoKHR present_info{ render_finished, swapchain,
+                                   swapchain_resources_.current_buffer_ };
+
+  auto result{ present_queue_->presentKHR(present_info) };
+
+  switch (result) {
+    case vk::Result::eSuccess:
+      break;
+    case vk::Result::eErrorOutOfDateKHR:
+      [[fallthrough]];
+    case vk::Result::eSuboptimalKHR: {
+      if (auto error{ co_await updateSwapchain() }; error) {
+        co_return error;
+      }
+    } break;
+    default:
+      LOG_ERROR("unexpected present result");
+      co_return Error::InternalError;
+  }
+
+  current_frame_ = (current_frame_ + 1) % frames_.size();
+
+  co_return Error::OK;
+}
+
+auto VulkanRenderingDevice::createBuffer(BufferDescription description)
+    -> boost::asio::awaitable<std::expected<BufferHandle, std::error_code>> {
+  co_return co_await co_spawn(
+      strands_.getStrand(StrandLanes::Buffer), doCreateBuffer(description),
+      boost::asio::use_awaitable);
+}
+
+auto VulkanRenderingDevice::destroyBuffer(BufferHandle buffer_handle)
+    -> boost::asio::awaitable<std::error_code> {
+  co_return co_await co_spawn(
+      strands_.getStrand(StrandLanes::Buffer), doDestroyBuffer(buffer_handle),
+      boost::asio::use_awaitable);
+}
+
+auto VulkanRenderingDevice::doInitialize() -> boost::asio::awaitable<std::error_code> {
   if (auto error{ co_await initializeVulkanInstance() }; error) {
     co_return error;
   }
@@ -650,100 +862,83 @@ auto VulkanRenderingDevice::initialize() -> boost::asio::awaitable<std::error_co
   co_return Error::OK;
 }
 
-auto VulkanRenderingDevice::prepareBuffers() -> boost::asio::awaitable<std::error_code> {
-  constexpr std::chrono::microseconds WaitDuration{ 50 };
+struct BufferCreateInfo {
+  VkBufferCreateInfo buffer_create_info_;
+  VmaAllocationCreateInfo vma_allocation_create_info_;
+};
 
-  auto executor = co_await boost::asio::this_coro::executor;
-  auto& sync = frames_.at(current_frame_);
+auto buildBufferCreateInfo(uint32_t size, BufferUsage usage, BufferVisibility visibility)
+    -> BufferCreateInfo {
+  BufferCreateInfo create_info{ .buffer_create_info_ = { .sType =
+                                                             VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                                         .size = size,
+                                                         .usage = toVulkan(usage),
+                                                         .sharingMode = VK_SHARING_MODE_EXCLUSIVE },
+                                .vma_allocation_create_info_ = { .usage = VMA_MEMORY_USAGE_AUTO } };
 
-  while (device_->waitForFences({ *sync.in_flight_ }, VK_TRUE, 0) == vk::Result::eTimeout) {
-    co_await boost::asio::steady_timer(executor, WaitDuration)
-        .async_wait(boost::asio::use_awaitable);
+  auto is_source{ has_flag(usage, BufferUsage::TransferSource) };
+  auto is_destination{ has_flag(usage, BufferUsage::TransferDestination) };
+
+  if (visibility == BufferVisibility::Host && (is_source || is_destination)) {
+    create_info.vma_allocation_create_info_.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
   }
 
-  while (true) {
-    auto [result, image_index]{ swapchain_resources_.swapchain_->acquireNextImage(
-        0, *sync.image_available_, nullptr) };
-
-    if (result == vk::Result::eSuccess || result == vk::Result::eSuboptimalKHR) {
-      if (frames_in_flight_[image_index] != nullptr) {
-        while (device_->waitForFences({ *frames_in_flight_[image_index] }, VK_TRUE, 0) ==
-               vk::Result::eTimeout) {
-          co_await boost::asio::steady_timer(executor, WaitDuration)
-              .async_wait(boost::asio::use_awaitable);
-        }
-      }
-      frames_in_flight_[image_index] = &(*sync.in_flight_);
-
-      swapchain_resources_.current_buffer_ = image_index;
-
-      device_->resetFences({ *sync.in_flight_ });
-      sync.command_pool_->reset();
-      sync.command_buffers_.clear();
-
-      co_return Error::OK;
-    }
-
-    if (result == vk::Result::eNotReady) {
-      co_await boost::asio::steady_timer(executor, WaitDuration)
-          .async_wait(boost::asio::use_awaitable);
-      continue;
-    }
-
-    if (result == vk::Result::eErrorOutOfDateKHR) {
-      if (auto error{ co_await updateSwapchain() }; error) {
-        co_return error;
-      }
-      continue;
-    }
-
-    LOG_ERROR("Unexpected Vulkan result: {}", vk::to_string(result));
-    co_return Error::InternalError;
+  if (is_source && !is_destination) {
+    create_info.vma_allocation_create_info_.flags |=
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+  } else if (!is_source && is_destination) {
+    create_info.vma_allocation_create_info_.flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
   }
+
+  return create_info;
 }
 
-auto VulkanRenderingDevice::swapBuffers() -> boost::asio::awaitable<std::error_code> {
-  std::vector<vk::SubmitInfo> submit_info;
+auto VulkanRenderingDevice::doCreateBuffer(BufferDescription description)
+    -> boost::asio::awaitable<std::expected<BufferHandle, std::error_code>> {
+  auto build_buffer_create_info{ buildBufferCreateInfo(
+      description.size_, description.usage_, description.visibility_) };
 
-  vk::PipelineStageFlags wait_destination_stage_mask{
-    vk::PipelineStageFlagBits::eColorAttachmentOutput
+  Buffer buffer{
+    .size_ = description.size_,
   };
 
-  auto& sync = frames_.at(current_frame_);
+  auto buffer_create_status{ vmaCreateBuffer(
+      memory_allocator_, &build_buffer_create_info.buffer_create_info_,
+      &build_buffer_create_info.vma_allocation_create_info_, &buffer.buffer_, &buffer.allocation_,
+      &buffer.allocation_info_) };
 
-  vk::Semaphore image_available = **sync.image_available_;
-  vk::Semaphore render_finished = **sync.render_finished_;
-
-  std::vector<vk::CommandBuffer> command_buffers{ sync.command_buffers_.begin(),
-                                                  sync.command_buffers_.end() };
-
-  submit_info.emplace_back(
-      image_available, wait_destination_stage_mask, command_buffers, render_finished);
-
-  graphics_queue_->submit(submit_info, *sync.in_flight_);
-
-  vk::SwapchainKHR swapchain = **swapchain_resources_.swapchain_;
-  vk::PresentInfoKHR present_info{ render_finished, swapchain,
-                                   swapchain_resources_.current_buffer_ };
-
-  auto result{ present_queue_->presentKHR(present_info) };
-
-  switch (result) {
-    case vk::Result::eSuccess:
-      break;
-    case vk::Result::eErrorOutOfDateKHR:
-      [[fallthrough]];
-    case vk::Result::eSuboptimalKHR: {
-      if (auto error{ co_await updateSwapchain() }; error) {
-        co_return error;
-      }
-    } break;
-    default:
-      LOG_ERROR("unexpected present result");
-      co_return Error::InternalError;
+  if (buffer_create_status != VkResult::VK_SUCCESS) [[unlikely]] {
+    LOG_ERROR("unable to create vma buffer");
+    co_return std::unexpected(Error::InternalError);
   }
 
-  current_frame_ = (current_frame_ + 1) % frames_.size();
+  BufferSlot buffer_slot;
+
+  if (!buffer_free_list_.empty()) {
+    auto index = buffer_free_list_.back();
+    buffer_free_list_.pop_back();
+    buffer_slot = buffers_.at(index);
+  } else {
+    buffer_slot = buffers_.emplace_back(buffer);
+  }
+
+  buffer_slot.buffer_ = buffer;
+  buffer_slot.alive_ = true;
+  co_return BufferHandle{ .index_ = buffers_.size() - 1, .generation_ = buffer_slot.generation_ };
+}
+
+auto VulkanRenderingDevice::doDestroyBuffer(BufferHandle buffer_handle)
+    -> boost::asio::awaitable<std::error_code> {
+  auto& buffer_slot{ buffers_.at(buffer_handle.index_) };
+  assert(buffer_handle.generation_ == buffer_slot.generation_);
+
+  buffer_slot.generation_++;
+  buffer_slot.alive_ = false;
+
+  pending_destroy_buffers_.emplace_back(
+      PendingDestroyBuffer{ .buffer_ = buffer_slot.buffer_,
+                            .slot_index_ = buffer_handle.index_,
+                            .fence_value_ = timeline_value_ });
 
   co_return Error::OK;
 }
@@ -935,9 +1130,12 @@ auto VulkanRenderingDevice::initializeLogicalDevice() -> boost::asio::awaitable<
   const auto device_features{ getRequiredDeviceFeatures(**physical_device_) };
 
   vk::DeviceCreateInfo device_create_info(
-      {}, device_queue_create_info, {}, enabled_extensions, &device_features, nullptr);
+      {}, device_queue_create_info, {}, enabled_extensions, &device_features.core_features_,
+      nullptr);
 
-  auto deviceExpect = physical_device_->createDevice(device_create_info);
+  device_create_info.pNext = &device_features.vulkan_12_features_;
+
+  auto deviceExpect{ physical_device_->createDevice(device_create_info) };
 
   if (deviceExpect) {
     device_ = std::move(*deviceExpect);
@@ -952,7 +1150,8 @@ auto VulkanRenderingDevice::initializeLogicalDevice() -> boost::asio::awaitable<
 
 auto VulkanRenderingDevice::initializeDynamicDispatcher()
     -> boost::asio::awaitable<std::error_code> {
-  // dynamic_dispatcher_.init(**instance_, vkGetInstanceProcAddr, **device_);
+  dynamic_dispatcher_.init(**instance_, vkGetInstanceProcAddr, **device_);
+  // dynamic_dispatcher_.init(vkGetSemaphoreCounterValue);
   co_return Error::OK;
 }
 
@@ -1017,6 +1216,17 @@ auto VulkanRenderingDevice::initializeSynchronization() -> boost::asio::awaitabl
     }
     frame.render_finished_ = std::move(*semaphore_expect);
   }
+
+  vk::SemaphoreTypeCreateInfo timeline_info{ vk::SemaphoreType::eTimeline, timeline_value_ };
+  vk::SemaphoreCreateInfo semaphore_info;
+  semaphore_info.pNext = &timeline_info;
+  auto semaphore_expect{ device_->createSemaphore(semaphore_info) };
+  vk::SemaphoreCreateFlagBits semaphore_create_flags{};
+  if (!semaphore_expect) {
+    LOG_ERROR("unable to create image available semaphore");
+    co_return Error::InternalError;
+  }
+  timeline_semaphore_ = std::move(*semaphore_expect);
 
   co_return Error::OK;
 }
@@ -1252,7 +1462,7 @@ auto VulkanRenderingDevice::initializeCommandBuffers() -> boost::asio::awaitable
 }
 
 auto VulkanRenderingDevice::updateSwapchain() -> boost::asio::awaitable<std::error_code> {
-  co_await sync();
+  sync();
 
   cleanupSwapchain();
   cleanupRenderPass();
@@ -1280,10 +1490,30 @@ void VulkanRenderingDevice::cleanupRenderPass() {
   render_pass_.reset();
 }
 
-auto VulkanRenderingDevice::sync() -> boost::asio::awaitable<void> {
-  device_->waitIdle();
+void VulkanRenderingDevice::collectPendingDestroyBuffers() {
+  uint64_t completed;
+  auto result = (**device_).getSemaphoreCounterValueKHR(
+      **timeline_semaphore_, &completed, dynamic_dispatcher_);
+  if (result != vk::Result::eSuccess) {
+    LOG_ERROR("pending deleted buffer collector failed to get semaphore counter value");
+    return;
+  }
 
-  co_return;
+  std::erase_if(pending_destroy_buffers_, [&completed, this](auto& pending_destroy_buffer) {
+    if (pending_destroy_buffer.fence_value_ <= completed) {
+      vmaDestroyBuffer(
+          memory_allocator_, pending_destroy_buffer.buffer_.buffer_,
+          pending_destroy_buffer.buffer_.allocation_);
+
+      buffer_free_list_.emplace_back(pending_destroy_buffer.slot_index_);
+      return true;
+    }
+    return false;
+  });
+}
+
+void VulkanRenderingDevice::sync() {
+  device_->waitIdle();
 }
 
 }  // namespace gravity

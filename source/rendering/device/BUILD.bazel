@@ -21,6 +21,7 @@ gravity_cc_binary(
         "//source/common/logging:logger",
         "//source/platform/window:glfw_window_context",
         "//source/rendering/backends/vulkan:vulkan_backend",
+        "//source/rendering/common:rendering_api",
         "//source/rendering/contexts/vulkan:vulkan_context",
     ],
 )

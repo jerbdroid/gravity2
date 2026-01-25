@@ -45,7 +45,7 @@ class StrandGroup {
       std::array<boost::asio::any_io_executor, static_cast<size_t>(System::StrandLanes::_Count)>;
 
   StrandGroup<System>(boost::asio::io_context::executor_type io_executor, StrandType strands)
-      : io_executor_{std::move(io_executor)}, strands_{std::move(strands)} {}
+      : io_executor_{ std::move(io_executor) }, strands_{ std::move(strands) } {}
 
   auto getStrand(System::StrandLanes lane) -> auto& { return strands_[static_cast<size_t>(lane)]; }
 
@@ -58,8 +58,10 @@ class StrandGroup {
 
 class Scheduler {
  public:
+  enum class StrandLanes : uint8_t { Main, _Count };
+
   Scheduler(size_t workers = std::thread::hardware_concurrency())
-      : workers_{workers, "Worker"}, main_worker_{1, "MainWorker"} {}
+      : workers_{ workers, "Worker" }, strands_{ makeStrands<Scheduler>() } {}
 
   template <typename System>
   auto makeStrands() -> StrandGroup<System> {
@@ -70,16 +72,14 @@ class Scheduler {
       strands[i] = boost::asio::make_strand(workers_.io_context_.get_executor());
     }
 
-    return StrandGroup<System>{workers_.io_context_.get_executor(), strands};
+    return StrandGroup<System>{ workers_.io_context_.get_executor(), strands };
   }
 
-  auto mainExecutor() -> boost::asio::io_context::executor_type {
-    return main_worker_.io_context_.get_executor();
-  }
+  auto getStrand(StrandLanes lane) -> auto& { return strands_.getStrand(lane); }
 
  private:
   Worker workers_;
-  Worker main_worker_;
+  StrandGroup<Scheduler> strands_;
 };
 
 }  // namespace gravity

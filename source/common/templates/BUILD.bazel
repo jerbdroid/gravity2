@@ -1,12 +1,11 @@
 load("//bazel:gravity_build_system.bzl", "gravity_cc_library")
 
 gravity_cc_library(
-    name = "rendering_api",
-    hdrs = ["rendering_api.hpp"],
+    name = "bitmask",
+    hdrs = ["bitmask.hpp"],
     visibility = [
         "//visibility:public",
     ],
     deps = [
-        "//source/common/templates:bitmask",
     ],
 )

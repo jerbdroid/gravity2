@@ -1,5 +1,7 @@
 #pragma once
 
+#include "source/common/templates/bitmask.hpp"
+
 #include <cstdint>
 
 namespace gravity {
@@ -22,5 +24,21 @@ enum class Format : uint8_t {
   Depth24UnsignedNormalizedStencil8UnsignedInteger = 9,
   Depth32SignedFloatStencil8UnsignedInt = 10
 };
+
+enum class BufferUsage : uint16_t {
+  TransferSource = (1U << 0U),
+  TransferDestination = (1U << 1U),
+  ReadOnlyTexel = (1U << 2U),
+  ReadWriteTexel = (1U << 3U),
+  ReadOnly = (1U << 4U),
+  ReadWrite = (1U << 5U),
+  Index = (1U << 6U),
+  Vertex = (1U << 7U),
+  Indirect = (1U << 8U),
+};
+
+constexpr auto enable_bitmask_operators(BufferUsage) -> bool;
+
+enum class BufferVisibility : uint8_t { Host, Device };
 
 }  // namespace gravity

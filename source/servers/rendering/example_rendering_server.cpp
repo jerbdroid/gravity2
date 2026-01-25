@@ -6,6 +6,8 @@
 #include "source/rendering/device/rendering_device.hpp"
 #include "source/rendering/device/vulkan/vulkan_rendering_device.hpp"
 
+#include <thread>
+
 using namespace gravity;
 using boost::asio::steady_timer;
 using boost::asio::use_awaitable;
@@ -27,9 +29,11 @@ auto main() -> int {
     return err.value();
   }
 
-  VulkanRenderingDevice vulkan_rendering_device{ window_context };
+  VulkanRenderingDevice vulkan_rendering_device{ window_context,
+                                                 scheduler.makeStrands<VulkanRenderingDevice>() };
   auto future = co_spawn(
-      scheduler.mainExecutor(), vulkan_rendering_device.initialize(), boost::asio::use_future);
+      scheduler.getStrand(Scheduler::StrandLanes::Main), vulkan_rendering_device.initialize(),
+      boost::asio::use_future);
   future.wait();
   if (auto err = future.get(); err) {
     LOG_ERROR("Failed to initialize rendering device: {}", err.value());
@@ -39,6 +43,8 @@ auto main() -> int {
                                     scheduler.makeStrands<RenderingServer>() };
 
   rendering_server.draw();
+
+  std::this_thread::sleep_for(5s);
 
   LOG_INFO("end");
 }

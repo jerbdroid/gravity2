@@ -12,45 +12,31 @@
 
 #include "vulkan/vulkan_handles.hpp"
 
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <unordered_set>
 #include <vector>
 
 namespace gravity {
 
-struct ImageData {
-  vk::UniqueImageView view_{ nullptr };
-  vk::ImageCreateInfo image_info_;
-  vk::ImageViewCreateInfo view_info_;
-  VmaAllocator allocator_{ nullptr };
-  VmaAllocation allocation_{ nullptr };
-  VmaAllocationInfo allocation_info_{};
-
-  ImageData() = default;
-  ImageData(const ImageData&) = delete;
-
-  ImageData(ImageData&& other) noexcept { *this = std::move(other); };
-
-  auto operator=(const ImageData&) -> ImageData& = delete;
-
-  auto operator=(ImageData&& other) -> ImageData& = default;
-
-  ~ImageData() {
-    if (view_info_.image != nullptr && allocator_ != nullptr) {
-      vmaDestroyImage(allocator_, view_info_.image, allocation_);
-      view_info_.image = nullptr;
-    }
-  }
-};
-
 class VulkanRenderingDevice : public RenderingDevice {
  public:
-  ~VulkanRenderingDevice() = default;
-  VulkanRenderingDevice(WindowContext& window_context);
+  enum class StrandLanes : uint8_t { Initialize, Buffer, Cleanup, _Count };
+  using StrandGroup = StrandGroup<VulkanRenderingDevice>;
+
+  ~VulkanRenderingDevice();
+  VulkanRenderingDevice(WindowContext& window_context, StrandGroup strands);
 
   auto initialize() -> boost::asio::awaitable<std::error_code> override;
   auto prepareBuffers() -> boost::asio::awaitable<std::error_code>;
   auto swapBuffers() -> boost::asio::awaitable<std::error_code>;
+
+  auto createBuffer(BufferDescription description)
+      -> boost::asio::awaitable<std::expected<BufferHandle, std::error_code>> override;
+
+  auto destroyBuffer(BufferHandle buffer_handle)
+      -> boost::asio::awaitable<std::error_code> override;
 
  private:
   struct FrameSync {
@@ -69,7 +55,27 @@ class VulkanRenderingDevice : public RenderingDevice {
     uint32_t current_buffer_;
   };
 
+  struct Buffer {
+    VkBuffer buffer_ = VK_NULL_HANDLE;
+    VmaAllocation allocation_ = VK_NULL_HANDLE;
+    VmaAllocationInfo allocation_info_ = {};
+    VkDeviceSize size_ = 0;
+  };
+
+  struct BufferSlot {
+    Buffer buffer_;
+    size_t generation_ = 0;
+    bool alive_ = true;
+  };
+
+  struct PendingDestroyBuffer {
+    Buffer buffer_;
+    size_t slot_index_;
+    size_t fence_value_;
+  };
+
   WindowContext& window_context_;
+  StrandGroup strands_;
 
   vk::raii::Context vk_context_;
 
@@ -102,6 +108,9 @@ class VulkanRenderingDevice : public RenderingDevice {
   std::array<vk::raii::Fence*, 2> frames_in_flight_;
   size_t current_frame_{ 0 };
 
+  std::optional<vk::raii::Semaphore> timeline_semaphore_;
+  size_t timeline_value_{ 0 };
+
   // cache
   std::optional<vk::raii::PipelineCache> pipeline_cache_;
 
@@ -114,9 +123,19 @@ class VulkanRenderingDevice : public RenderingDevice {
   // dynamic loader for EXT
   vk::detail::DispatchLoaderDynamic dynamic_dispatcher_;
 
+  // Buffers
+  std::vector<BufferSlot> buffers_;
+  std::vector<PendingDestroyBuffer> pending_destroy_buffers_;
+  std::vector<size_t> buffer_free_list_;
+
   std::unordered_set<std::string> enabled_instance_extension_names_;
   std::unordered_set<std::string> enabled_instance_layer_names_;
   std::unordered_set<std::string> enabled_device_extension_names_;
+
+  auto doInitialize() -> boost::asio::awaitable<std::error_code>;
+  auto doCreateBuffer(BufferDescription description)
+      -> boost::asio::awaitable<std::expected<BufferHandle, std::error_code>>;
+  auto doDestroyBuffer(BufferHandle buffer_handle) -> boost::asio::awaitable<std::error_code>;
 
   auto initializeVulkanInstance() -> boost::asio::awaitable<std::error_code>;
   auto initializeSurface() -> boost::asio::awaitable<std::error_code>;
@@ -139,7 +158,9 @@ class VulkanRenderingDevice : public RenderingDevice {
   void cleanupSwapchain();
   void cleanupRenderPass();
 
-  auto sync() -> boost::asio::awaitable<void>;
+  void collectPendingDestroyBuffers();
+
+  void sync();
 };
 
 }  // namespace gravity

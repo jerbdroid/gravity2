@@ -9,6 +9,7 @@ gravity_cc_library(
     ],
     deps = [
         "//source/common/scheduler",
+        "//source/rendering/common:rendering_api",
         "//source/rendering/device:rendering_device",
         "@boost.asio",
     ],
@@ -24,6 +25,6 @@ gravity_cc_binary(
         "//source/common/logging:logger",
         "//source/platform/window:glfw_window_context",
         "//source/rendering/device:rendering_device",
-        "//source/rendering/device/vulkan:vulkan_rendering_device", 
+        "//source/rendering/device/vulkan:vulkan_rendering_device",
     ],
 )

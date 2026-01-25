@@ -12,6 +12,7 @@ gravity_cc_library(
         ":descriptor_allocator",
         "//source/common/scheduler",
         "//source/platform/window:glfw_window_context",
+        "//source/rendering/common:rendering_api",
         "//source/rendering/device:rendering_device",
         "@magic_enum",
         "@vulkan_windows//:vulkan_cc_library",
