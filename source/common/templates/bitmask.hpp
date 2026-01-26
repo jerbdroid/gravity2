@@ -1,6 +1,5 @@
 #pragma once
 
-#include <concepts>
 #include <type_traits>
 
 namespace gravity {
@@ -15,9 +14,9 @@ constexpr auto operator|(T lhs, T rhs) -> T {
 }
 
 template <BitmaskEnum T>
-constexpr auto has_flag(T value, T flag) -> bool {
-    using U = std::underlying_type_t<T>;
-    return (static_cast<U>(value) & static_cast<U>(flag)) != 0;
+constexpr auto hasFlag(T value, T flag) -> bool {
+  using U = std::underlying_type_t<T>;
+  return (static_cast<U>(value) & static_cast<U>(flag)) != 0;
 }
 
 }  // namespace gravity

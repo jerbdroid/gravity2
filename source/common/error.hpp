@@ -5,15 +5,16 @@
 namespace gravity {
 
 enum class Error : std::uint8_t {
-  OK = 0,
-  InternalError = 1,
-  AlreadyExistsError = 2,
-  InvalidArgumentError = 3,
-  NotFoundError = 4,
-  UnavailableError = 5,
-  UnimplementedError = 6,
-  AbortedError = 7,
-  FailedPreconditionError = 8
+  OK,
+  InternalError,
+  AlreadyExistsError,
+  InvalidArgumentError,
+  NotFoundError,
+  UnavailableError,
+  UnimplementedError,
+  AbortedError,
+  FailedPreconditionError,
+  FeatureNotSupported
 };
 
 auto ErrorCategory() -> const std::error_category&;

@@ -9,6 +9,7 @@
 
 #include "GLFW/glfw3.h"
 #include "magic_enum.hpp"
+#include "source/rendering/device/rendering_device.hpp"
 #include "vulkan/vulkan_core.h"
 #include "vulkan/vulkan_enums.hpp"
 #include "vulkan/vulkan_funcs.hpp"
@@ -20,10 +21,11 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <expected>
+#include <system_error>
 #include <utility>
 #include <vector>
-
 
 namespace {
 
@@ -437,11 +439,6 @@ void enableIfFeature(T& physical_device_features, const U& features) {
   }
 }
 
-struct DeviceFeaturesWithTimeline {
-  vk::PhysicalDeviceFeatures core_features_;
-  vk::PhysicalDeviceVulkan12Features vulkan_12_features_;
-};
-
 auto getRequiredDeviceFeatures(const vk::PhysicalDevice& physical_device)
     -> DeviceFeaturesWithTimeline {
   auto available_device_features{ physical_device.getFeatures() };
@@ -609,34 +606,187 @@ auto pickPresentMode(const std::vector<vk::PresentModeKHR>& present_modes) -> vk
 auto toVulkan(BufferUsage usage) -> VkBufferUsageFlags {
   VkBufferUsageFlags flags{};
 
-  if (has_flag(usage, BufferUsage::TransferSource)) {
+  if (hasFlag(usage, BufferUsage::TransferSource)) {
     flags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
   }
-  if (has_flag(usage, BufferUsage::TransferDestination)) {
+  if (hasFlag(usage, BufferUsage::TransferDestination)) {
     flags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   }
-  if (has_flag(usage, BufferUsage::ReadOnlyTexel)) {
+  if (hasFlag(usage, BufferUsage::ReadOnlyTexel)) {
     flags |= VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
   }
-  if (has_flag(usage, BufferUsage::ReadWriteTexel)) {
+  if (hasFlag(usage, BufferUsage::ReadWriteTexel)) {
     flags |= VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
   }
-  if (has_flag(usage, BufferUsage::ReadOnly)) {
+  if (hasFlag(usage, BufferUsage::ReadOnly)) {
     flags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
   }
-  if (has_flag(usage, BufferUsage::ReadWrite)) {
+  if (hasFlag(usage, BufferUsage::ReadWrite)) {
     flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
   }
-  if (has_flag(usage, BufferUsage::Index)) {
+  if (hasFlag(usage, BufferUsage::Index)) {
     flags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
   }
-  if (has_flag(usage, BufferUsage::Vertex)) {
+  if (hasFlag(usage, BufferUsage::Vertex)) {
     flags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
   }
-  if (has_flag(usage, BufferUsage::Indirect)) {
+  if (hasFlag(usage, BufferUsage::Indirect)) {
     flags |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
   }
 
+  return flags;
+}
+
+auto toVulkan(ImageUsage usage) -> VkImageUsageFlags {
+  VkImageUsageFlags flags{};
+
+  if (hasFlag(usage, ImageUsage::TransferSource)) {
+    flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  }
+  if (hasFlag(usage, ImageUsage::TransferDestination)) {
+    flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  }
+  if (hasFlag(usage, ImageUsage::Sampled)) {
+    flags |= VK_IMAGE_USAGE_SAMPLED_BIT;
+  }
+  if (hasFlag(usage, ImageUsage::ColorAttachment)) {
+    flags |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+  }
+  if (hasFlag(usage, ImageUsage::DepthStencilAttachment)) {
+    flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+  }
+
+  return flags;
+}
+
+auto toVulkan(Format format) -> VkFormat {
+  switch (format) {
+    case Format::Undefined:
+      return VK_FORMAT_UNDEFINED;
+    case Format::ColorRgba8UnsignedNormalized:
+      return VK_FORMAT_R8G8B8A8_UNORM;
+    case Format::ColorRgba8SignedNormalized:
+      return VK_FORMAT_R8G8B8A8_SNORM;
+    case Format::ColorRgba8sRgb:
+      return VK_FORMAT_R8G8B8A8_SRGB;
+    case Format::ColorRg32SignedFloat:
+      return VK_FORMAT_R32G32_SFLOAT;
+    case Format::ColorRgb32SignedFloat:
+      return VK_FORMAT_R32G32B32_SFLOAT;
+    case Format::ColorRgba32UnsignedInt:
+      return VK_FORMAT_R32G32B32A32_UINT;
+    case Format::Depth32SignedFloat:
+      return VK_FORMAT_D32_SFLOAT;
+    case Format::Depth24UnsignedNormalizedStencil8UnsignedInteger:
+      return VK_FORMAT_D24_UNORM_S8_UINT;
+    case Format::Depth32SignedFloatStencil8UnsignedInt:
+      return VK_FORMAT_D32_SFLOAT_S8_UINT;
+  }
+}
+
+auto toVulkan(ImageSamples image_sample) -> VkSampleCountFlagBits {
+  switch (image_sample) {
+    case ImageSamples::S1:
+      return VK_SAMPLE_COUNT_1_BIT;
+    case ImageSamples::S2:
+      return VK_SAMPLE_COUNT_2_BIT;
+    case ImageSamples::S4:
+      return VK_SAMPLE_COUNT_4_BIT;
+    case ImageSamples::S8:
+      return VK_SAMPLE_COUNT_8_BIT;
+    case ImageSamples::S16:
+      return VK_SAMPLE_COUNT_16_BIT;
+    case ImageSamples::S32:
+      return VK_SAMPLE_COUNT_32_BIT;
+    case ImageSamples::S64:
+      return VK_SAMPLE_COUNT_64_BIT;
+  }
+}
+
+auto toVulkan(SamplerFilter sampler_filter) -> VkFilter {
+  switch (sampler_filter) {
+    case SamplerFilter::Nearest:
+      return VK_FILTER_NEAREST;
+    case SamplerFilter::Linear:
+      return VK_FILTER_LINEAR;
+    case SamplerFilter::Cubic:
+      return VK_FILTER_CUBIC_EXT;
+  }
+}
+
+auto toVulkan(SamplerMipMapMode sampler_mipmap_mode) -> VkSamplerMipmapMode {
+  switch (sampler_mipmap_mode) {
+    case SamplerMipMapMode::Nearest:
+      return VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    case SamplerMipMapMode::Linear:
+      return VK_SAMPLER_MIPMAP_MODE_LINEAR;
+  }
+}
+
+auto toVulkan(SamplerAddressMode sampler_address_mode) -> VkSamplerAddressMode {
+  switch (sampler_address_mode) {
+    case SamplerAddressMode::Repeat:
+      return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    case SamplerAddressMode::MirroredRepeat:
+      return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+    case SamplerAddressMode::ClampToEdge:
+      return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    case SamplerAddressMode::ClampToBorder:
+      return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    case SamplerAddressMode::MirrorClampToEdge:
+      return VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
+  }
+}
+
+auto toVulkan(CompareOperation compare_operation) -> VkCompareOp {
+  switch (compare_operation) {
+    case CompareOperation::Never:
+      return VK_COMPARE_OP_NEVER;
+    case CompareOperation::Less:
+      return VK_COMPARE_OP_LESS;
+    case CompareOperation::Equal:
+      return VK_COMPARE_OP_EQUAL;
+    case CompareOperation::LessOrEqual:
+      return VK_COMPARE_OP_LESS_OR_EQUAL;
+    case CompareOperation::Greater:
+      return VK_COMPARE_OP_GREATER;
+    case CompareOperation::NotEqual:
+      return VK_COMPARE_OP_NOT_EQUAL;
+    case CompareOperation::GreaterOrEqual:
+      return VK_COMPARE_OP_GREATER_OR_EQUAL;
+    case CompareOperation::Always:
+      return VK_COMPARE_OP_ALWAYS;
+  }
+}
+
+auto toVulkan(BorderColor border_color) -> VkBorderColor {
+  switch (border_color) {
+    case BorderColor::FloatOpaqueBlack:
+      return VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+  }
+}
+
+auto toVulkan(ShaderStage usage) -> VkShaderStageFlags {
+  VkShaderStageFlags flags{};
+
+  if (hasFlag(usage, ShaderStage::Vertex)) {
+    flags |= VK_SHADER_STAGE_VERTEX_BIT;
+  }
+  if (hasFlag(usage, ShaderStage::Fragment)) {
+    flags |= VK_SHADER_STAGE_FRAGMENT_BIT;
+  }
+  if (hasFlag(usage, ShaderStage::Compute)) {
+    flags |= VK_SHADER_STAGE_COMPUTE_BIT;
+  }
+  if (hasFlag(usage, ShaderStage::Geometry)) {
+    flags |= VK_SHADER_STAGE_GEOMETRY_BIT;
+  }
+  if (hasFlag(usage, ShaderStage::TesselationControl)) {
+    flags |= VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+  }
+  if (hasFlag(usage, ShaderStage::TesselationEvaluation)) {
+    flags |= VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+  }
   return flags;
 }
 
@@ -651,16 +801,38 @@ VulkanRenderingDevice::~VulkanRenderingDevice() {
   sync();
 
   for (auto& buffer : buffers_) {
-    if (buffer.alive_) {
-      vmaDestroyBuffer(memory_allocator_, buffer.buffer_.buffer_, buffer.buffer_.allocation_);
-    }
+    auto result = boost::asio::co_spawn(
+        strands_.getStrand(StrandLanes::Buffer),
+        doDestroyBuffer({ .index_ = buffer.index_, .generation_ = buffer.generation_ }),
+        boost::asio::use_future);
+    result.wait();
   }
 
-  for (auto& pending_destroy_buffer : pending_destroy_buffers_) {
-    vmaDestroyBuffer(
-        memory_allocator_, pending_destroy_buffer.buffer_.buffer_,
-        pending_destroy_buffer.buffer_.allocation_);
+  for (auto& image : images_) {
+    auto result = boost::asio::co_spawn(
+        strands_.getStrand(StrandLanes::Buffer),
+        doDestroyImage({ .index_ = image.index_, .generation_ = image.generation_ }),
+        boost::asio::use_future);
+    result.wait();
   }
+
+  for (auto& shader_module : shader_modules_) {
+    auto result = boost::asio::co_spawn(
+        strands_.getStrand(StrandLanes::Buffer),
+        doDestroyShader(
+            { .index_ = shader_module.index_, .generation_ = shader_module.generation_ }),
+        boost::asio::use_future);
+    result.wait();
+  }
+
+  auto result = boost::asio::co_spawn(
+      strands_.getStrand(StrandLanes::Buffer),
+      [this] -> boost::asio::awaitable<void> {
+        collectPendingDestroy();
+        co_return;
+      },
+      boost::asio::use_future);
+  result.wait();
 
   vmaDestroyAllocator(memory_allocator_);
 }
@@ -780,7 +952,7 @@ auto VulkanRenderingDevice::swapBuffers() -> boost::asio::awaitable<std::error_c
   co_return Error::OK;
 }
 
-auto VulkanRenderingDevice::createBuffer(BufferDescription description)
+auto VulkanRenderingDevice::createBuffer(const BufferDescription& description)
     -> boost::asio::awaitable<std::expected<BufferHandle, std::error_code>> {
   co_return co_await co_spawn(
       strands_.getStrand(StrandLanes::Buffer), doCreateBuffer(description),
@@ -791,6 +963,48 @@ auto VulkanRenderingDevice::destroyBuffer(BufferHandle buffer_handle)
     -> boost::asio::awaitable<std::error_code> {
   co_return co_await co_spawn(
       strands_.getStrand(StrandLanes::Buffer), doDestroyBuffer(buffer_handle),
+      boost::asio::use_awaitable);
+}
+
+auto VulkanRenderingDevice::createImage(const ImageDescription& description)
+    -> boost::asio::awaitable<std::expected<ImageHandle, std::error_code>> {
+  co_return co_await co_spawn(
+      strands_.getStrand(StrandLanes::Buffer), doCreateImage(description),
+      boost::asio::use_awaitable);
+}
+
+auto VulkanRenderingDevice::destroyImage(ImageHandle image_handle)
+    -> boost::asio::awaitable<std::error_code> {
+  co_return co_await co_spawn(
+      strands_.getStrand(StrandLanes::Buffer), doDestroyImage(image_handle),
+      boost::asio::use_awaitable);
+}
+
+auto VulkanRenderingDevice::createSampler(const SamplerDescription& description)
+    -> boost::asio::awaitable<std::expected<SamplerHandle, std::error_code>> {
+  co_return co_await co_spawn(
+      strands_.getStrand(StrandLanes::Sampler), doCreateSampler(description),
+      boost::asio::use_awaitable);
+}
+
+auto VulkanRenderingDevice::destroySampler(SamplerHandle sampler_handle)
+    -> boost::asio::awaitable<std::error_code> {
+  co_return co_await co_spawn(
+      strands_.getStrand(StrandLanes::Sampler), doDestroySampler(sampler_handle),
+      boost::asio::use_awaitable);
+}
+
+auto VulkanRenderingDevice::createShader(ShaderDescription description)
+    -> boost::asio::awaitable<std::expected<ShaderHandle, std::error_code>> {
+  co_return co_await co_spawn(
+      strands_.getStrand(StrandLanes::Shader), doCreateShader(std::move(description)),
+      boost::asio::use_awaitable);
+}
+
+auto VulkanRenderingDevice::destroyShader(ShaderHandle shader_handle)
+    -> boost::asio::awaitable<std::error_code> {
+  co_return co_await co_spawn(
+      strands_.getStrand(StrandLanes::Shader), doDestroyShader(shader_handle),
       boost::asio::use_awaitable);
 }
 
@@ -867,7 +1081,7 @@ struct BufferCreateInfo {
   VmaAllocationCreateInfo vma_allocation_create_info_;
 };
 
-auto buildBufferCreateInfo(uint32_t size, BufferUsage usage, BufferVisibility visibility)
+auto buildBufferCreateInfo(uint32_t size, BufferUsage usage, Visibility visibility)
     -> BufferCreateInfo {
   BufferCreateInfo create_info{ .buffer_create_info_ = { .sType =
                                                              VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -876,10 +1090,10 @@ auto buildBufferCreateInfo(uint32_t size, BufferUsage usage, BufferVisibility vi
                                                          .sharingMode = VK_SHARING_MODE_EXCLUSIVE },
                                 .vma_allocation_create_info_ = { .usage = VMA_MEMORY_USAGE_AUTO } };
 
-  auto is_source{ has_flag(usage, BufferUsage::TransferSource) };
-  auto is_destination{ has_flag(usage, BufferUsage::TransferDestination) };
+  auto is_source{ hasFlag(usage, BufferUsage::TransferSource) };
+  auto is_destination{ hasFlag(usage, BufferUsage::TransferDestination) };
 
-  if (visibility == BufferVisibility::Host && (is_source || is_destination)) {
+  if (visibility == Visibility::Host && (is_source || is_destination)) {
     create_info.vma_allocation_create_info_.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
   }
 
@@ -895,6 +1109,11 @@ auto buildBufferCreateInfo(uint32_t size, BufferUsage usage, BufferVisibility vi
 
 auto VulkanRenderingDevice::doCreateBuffer(BufferDescription description)
     -> boost::asio::awaitable<std::expected<BufferHandle, std::error_code>> {
+  LOG_DEBUG(
+      "created buffer; size: {}, usage: {}, visibility: {}, buffer_allocator_size: {}",
+      description.size_, magic_enum::enum_name(description.usage_),
+      magic_enum::enum_name(description.visibility_), buffers_.size());
+
   auto build_buffer_create_info{ buildBufferCreateInfo(
       description.size_, description.usage_, description.visibility_) };
 
@@ -908,37 +1127,259 @@ auto VulkanRenderingDevice::doCreateBuffer(BufferDescription description)
       &buffer.allocation_info_) };
 
   if (buffer_create_status != VkResult::VK_SUCCESS) [[unlikely]] {
-    LOG_ERROR("unable to create vma buffer");
+    LOG_DEBUG(
+        "created buffer failed; size: {}, usage: {}, visibility: {}, buffer_allocator_size: {}",
+        description.size_, magic_enum::enum_name(description.usage_),
+        magic_enum::enum_name(description.visibility_), buffers_.size());
     co_return std::unexpected(Error::InternalError);
   }
 
-  BufferSlot buffer_slot;
-
+  size_t slot_index{ 0 };
   if (!buffer_free_list_.empty()) {
-    auto index = buffer_free_list_.back();
+    slot_index = buffer_free_list_.back();
     buffer_free_list_.pop_back();
-    buffer_slot = buffers_.at(index);
   } else {
-    buffer_slot = buffers_.emplace_back(buffer);
+    buffers_.emplace_back();
+    slot_index = buffers_.size() - 1;
   }
+  buffers_[slot_index].index_ = slot_index;
+  buffers_[slot_index].buffer_ = buffer;
 
-  buffer_slot.buffer_ = buffer;
-  buffer_slot.alive_ = true;
-  co_return BufferHandle{ .index_ = buffers_.size() - 1, .generation_ = buffer_slot.generation_ };
+  LOG_DEBUG(
+      "created buffer success; size: {}, usage: {}, visibility: {}, index: {}, generation: {}, "
+      "buffer_allocator_size: {}",
+      description.size_, magic_enum::enum_name(description.usage_),
+      magic_enum::enum_name(description.visibility_), buffers_[slot_index].index_,
+      buffers_[slot_index].generation_, buffers_.size());
+
+  co_return BufferHandle{ .index_ = buffers_[slot_index].index_,
+                          .generation_ = buffers_[slot_index].generation_ };
 }
 
 auto VulkanRenderingDevice::doDestroyBuffer(BufferHandle buffer_handle)
     -> boost::asio::awaitable<std::error_code> {
-  auto& buffer_slot{ buffers_.at(buffer_handle.index_) };
-  assert(buffer_handle.generation_ == buffer_slot.generation_);
+  LOG_DEBUG(
+      "destroy buffer; index: {}, handler generation: {}, storage_generation: {}, "
+      "current_timeline_value: {}",
+      buffer_handle.index_, buffer_handle.generation_, buffers_[buffer_handle.index_].generation_,
+      timeline_value_);
 
-  buffer_slot.generation_++;
-  buffer_slot.alive_ = false;
+  if (buffers_[buffer_handle.index_].buffer_.buffer_ == VK_NULL_HANDLE) {
+    LOG_TRACE("destroy buffer buffer already destroyed");
+    co_return Error::OK;
+  }
+
+  assert(buffer_handle.generation_ == buffers_[buffer_handle.index_].generation_);
+
+  buffers_[buffer_handle.index_].generation_++;
 
   pending_destroy_buffers_.emplace_back(
-      PendingDestroyBuffer{ .buffer_ = buffer_slot.buffer_,
-                            .slot_index_ = buffer_handle.index_,
-                            .fence_value_ = timeline_value_ });
+      PendingDestroy{ .index_ = buffer_handle.index_, .fence_value_ = timeline_value_ });
+
+  co_return Error::OK;
+}
+
+auto VulkanRenderingDevice::doCreateImage(ImageDescription description)
+    -> boost::asio::awaitable<std::expected<ImageHandle, std::error_code>> {
+  ImageSlot* image_slot{ nullptr };
+
+  if (!buffer_free_list_.empty()) {
+    auto index = image_free_list_.back();
+    image_free_list_.pop_back();
+    image_slot = &images_.at(index);
+  } else {
+    image_slot = &images_.emplace_back();
+    image_slot->index_ = images_.size() - 1;
+  }
+
+  auto& image{ image_slot->image_ };
+
+  auto& image_create_info{ image.image_create_info_ };
+
+  image_create_info = {};
+  image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  image_create_info.imageType = VK_IMAGE_TYPE_2D;
+  image_create_info.format = toVulkan(description.format_);
+  image_create_info.extent = { .width = description.extent_.width_,
+                               .height = description.extent_.height_,
+                               .depth = 1 };
+  image_create_info.mipLevels = description.mip_level_;
+  image_create_info.arrayLayers = description.layers_;
+  image_create_info.samples = toVulkan(description.samples_);
+  image_create_info.tiling = description.visibility_ == Visibility::Host ? VK_IMAGE_TILING_LINEAR
+                                                                         : VK_IMAGE_TILING_OPTIMAL;
+  image_create_info.usage = toVulkan(description.usage_);
+  image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  image_create_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+  if (description.type_ == ImageType::Cube) {
+    image_create_info.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+  }
+
+  VmaAllocationCreateInfo image_allocation_create_info{
+    .flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT, .usage = VMA_MEMORY_USAGE_AUTO
+  };
+
+  auto result{ vmaCreateImage(
+      memory_allocator_, &image_create_info, &image_allocation_create_info, &image.image_,
+      &image.allocation_, &image.allocation_info_) };
+
+  if (result != VK_SUCCESS) {
+    LOG_TRACE("unable to allocate memory for image");
+    co_return std::unexpected(Error::InternalError);
+  }
+
+  auto& image_view_create_info{ image.image_view_create_info_ };
+
+  image_view_create_info = {};
+  image_view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  image_view_create_info.image = image.image_;
+  image_view_create_info.viewType =
+      description.type_ == ImageType::Cube ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D;
+  image_view_create_info.format = image_create_info.format;
+  image_view_create_info.subresourceRange.baseMipLevel = 0;
+  image_view_create_info.subresourceRange.levelCount = image_create_info.mipLevels;
+  image_view_create_info.subresourceRange.baseArrayLayer = 0;
+  image_view_create_info.subresourceRange.layerCount = image_create_info.arrayLayers;
+  image_view_create_info.subresourceRange.aspectMask =
+      hasFlag(description.usage_, ImageUsage::DepthStencilAttachment) ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                                                      : VK_IMAGE_ASPECT_COLOR_BIT;
+
+  auto image_view_expect{ device_->createImageView(image_view_create_info) };
+  if (!image_view_expect) {
+    LOG_ERROR("unable to create image view");
+    co_return std::unexpected(Error::InternalError);
+  }
+  image.image_view_ = image_view_expect->release();
+
+  co_return ImageHandle{ .index_ = image_slot->index_, .generation_ = image_slot->generation_ };
+}
+
+auto VulkanRenderingDevice::doDestroyImage(ImageHandle image_handle)
+    -> boost::asio::awaitable<std::error_code> {
+  LOG_DEBUG(
+      "destroy image; index: {}, handler generation: {}, storage_generation: {}, "
+      "current_timeline_value: {}",
+      image_handle.index_, image_handle.generation_, images_[image_handle.index_].generation_,
+      timeline_value_);
+
+  assert(image_handle.generation_ == images_[image_handle.index_].generation_);
+
+  images_[image_handle.index_].generation_++;
+
+  pending_destroy_images_.emplace_back(
+      PendingDestroy{ .index_ = image_handle.index_, .fence_value_ = timeline_value_ });
+
+  co_return Error::OK;
+}
+
+auto VulkanRenderingDevice::doCreateSampler(SamplerDescription description)
+    -> boost::asio::awaitable<std::expected<SamplerHandle, std::error_code>> {
+
+  if (description.anisotropy_enabled_) {
+    if (device_features_.core_features_.samplerAnisotropy == VK_FALSE) {
+      co_return std::unexpected(Error::FeatureNotSupported);
+    }
+  }
+
+  vk::SamplerCreateInfo sampler_create_info{
+    vk::SamplerCreateFlags(),
+    static_cast<vk::Filter>(toVulkan(description.magnification_filter_)),
+    static_cast<vk::Filter>(toVulkan(description.minification_filter_)),
+    static_cast<vk::SamplerMipmapMode>(toVulkan(description.mipmap_mode_)),
+    static_cast<vk::SamplerAddressMode>(toVulkan(description.address_mode_u_)),
+    static_cast<vk::SamplerAddressMode>(toVulkan(description.address_mode_v_)),
+    static_cast<vk::SamplerAddressMode>(toVulkan(description.address_mode_w_)),
+    description.mip_lod_bias_,
+    description.anisotropy_enabled_ ? VK_TRUE : VK_FALSE,
+    std::min(description.max_anisotropy_, device_limits_.maxSamplerAnisotropy),
+    description.compare_enabled_ ? VK_TRUE : VK_FALSE,
+    static_cast<vk::CompareOp>(toVulkan(description.comparison_operation_)),
+    description.min_lod_,
+    description.max_lod_,
+    static_cast<vk::BorderColor>(toVulkan(description.border_color_)),
+    VK_FALSE
+  };
+
+  auto sampler_expect{ device_->createSampler(sampler_create_info) };
+
+  if (!sampler_expect) {
+    LOG_ERROR("unable to create sampler");
+    co_return std::unexpected(Error::InternalError);
+  }
+
+  auto& sampler_slot{ samplers_.emplace_back(
+      SamplerSlot{ .sampler_ = { .sampler_ = std::move(*sampler_expect),
+                                 .sampler_create_info_ = sampler_create_info } }) };
+
+  sampler_slot.index_ = samplers_.size() - 1;
+
+  co_return SamplerHandle{ .index_ = sampler_slot.index_, .generation_ = 0 };
+}
+
+auto VulkanRenderingDevice::doDestroySampler(SamplerHandle image_handle)
+    -> boost::asio::awaitable<std::error_code> {
+
+  co_return Error::OK;
+}
+
+auto VulkanRenderingDevice::doCreateShader(ShaderDescription description)
+    -> boost::asio::awaitable<std::expected<ShaderHandle, std::error_code>> {
+  LOG_DEBUG(
+      "create shader; entry_point: {}, shader_type: {}, shader_module_allocator_size: {}",
+      description.entry_point_, magic_enum::enum_name(description.stage_), shader_modules_.size());
+
+  vk::ShaderModuleCreateInfo createInfo{ vk::ShaderModuleCreateFlags(), description.spirv_ };
+
+  auto shader_module_expect{ device_->createShaderModule(createInfo) };
+  if (!shader_module_expect) {
+    LOG_ERROR(
+        "created shader failed; entry_point: {}, shader_type: {}, shader_module_allocator_size: {}",
+        description.entry_point_, magic_enum::enum_name(description.stage_),
+        shader_modules_.size());
+    co_return std::unexpected(Error::InternalError);
+  }
+
+  size_t slot_index{ 0 };
+  if (!shader_module_free_list_.empty()) {
+    slot_index = shader_module_free_list_.back();
+    shader_module_free_list_.pop_back();
+    shader_modules_[slot_index].shader_.module_ = std::move(*shader_module_expect);
+  } else {
+    shader_modules_.emplace_back(
+        ShaderSlot{ .shader_ = { .module_ = std::move(*shader_module_expect),
+                                 .stage_ = description.stage_ } });
+    slot_index = shader_modules_.size() - 1;
+    shader_modules_[slot_index].index_ = slot_index;
+  }
+
+  shader_modules_[slot_index].shader_.stage_ = description.stage_;
+
+  LOG_DEBUG(
+      "created shader success; entry_point: {}, shader_type: {}, index: {}, generation: {}, "
+      "shader_module_allocator_size: {}",
+      description.entry_point_, magic_enum::enum_name(description.stage_),
+      shader_modules_[slot_index].index_, shader_modules_[slot_index].generation_,
+      shader_modules_.size());
+
+  co_return ShaderHandle{ .index_ = shader_modules_[slot_index].index_,
+                          .generation_ = shader_modules_[slot_index].generation_ };
+}
+
+auto VulkanRenderingDevice::doDestroyShader(ShaderHandle shader_handle)
+    -> boost::asio::awaitable<std::error_code> {
+  LOG_DEBUG(
+      "destroy shader; index: {}, handler generation: {}, storage_generation: {}, "
+      "current_timeline_value: {}",
+      shader_handle.index_, shader_handle.generation_,
+      shader_modules_[shader_handle.index_].generation_, timeline_value_);
+
+  assert(shader_handle.generation_ == shader_modules_[shader_handle.index_].generation_);
+
+  shader_handle.generation_++;
+
+  pending_destroy_shader_modules_.emplace_back(
+      PendingDestroy{ .index_ = shader_handle.index_, .fence_value_ = timeline_value_ });
 
   co_return Error::OK;
 }
@@ -1072,6 +1513,7 @@ auto VulkanRenderingDevice::initializePhysicalDevice() -> boost::asio::awaitable
     co_return Error::InternalError;
   }
   physical_device_.emplace(*instance_, optimal_device_iter->second);
+  device_limits_ = physical_device_->getProperties().limits;
 
   co_return Error::OK;
 }
@@ -1127,13 +1569,13 @@ auto VulkanRenderingDevice::initializeLogicalDevice() -> boost::asio::awaitable<
       enabled_device_extension_names_, std::back_inserter(enabled_extensions),
       [](const std::string& extension) { return extension.c_str(); });
 
-  const auto device_features{ getRequiredDeviceFeatures(**physical_device_) };
+  device_features_ = getRequiredDeviceFeatures(**physical_device_);
 
   vk::DeviceCreateInfo device_create_info(
-      {}, device_queue_create_info, {}, enabled_extensions, &device_features.core_features_,
+      {}, device_queue_create_info, {}, enabled_extensions, &device_features_.core_features_,
       nullptr);
 
-  device_create_info.pNext = &device_features.vulkan_12_features_;
+  device_create_info.pNext = &device_features_.vulkan_12_features_;
 
   auto deviceExpect{ physical_device_->createDevice(device_create_info) };
 
@@ -1490,7 +1932,7 @@ void VulkanRenderingDevice::cleanupRenderPass() {
   render_pass_.reset();
 }
 
-void VulkanRenderingDevice::collectPendingDestroyBuffers() {
+void VulkanRenderingDevice::collectPendingDestroy() {
   uint64_t completed;
   auto result = (**device_).getSemaphoreCounterValueKHR(
       **timeline_semaphore_, &completed, dynamic_dispatcher_);
@@ -1499,13 +1941,40 @@ void VulkanRenderingDevice::collectPendingDestroyBuffers() {
     return;
   }
 
-  std::erase_if(pending_destroy_buffers_, [&completed, this](auto& pending_destroy_buffer) {
-    if (pending_destroy_buffer.fence_value_ <= completed) {
-      vmaDestroyBuffer(
-          memory_allocator_, pending_destroy_buffer.buffer_.buffer_,
-          pending_destroy_buffer.buffer_.allocation_);
+  std::erase_if(pending_destroy_buffers_, [&completed, this](auto& pending_destroy) {
+    if (pending_destroy.fence_value_ <= completed) {
+      if (buffers_[pending_destroy.index_].buffer_.buffer_ != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(
+            memory_allocator_, buffers_[pending_destroy.index_].buffer_.buffer_,
+            buffers_[pending_destroy.index_].buffer_.allocation_);
 
-      buffer_free_list_.emplace_back(pending_destroy_buffer.slot_index_);
+        buffers_[pending_destroy.index_].buffer_.buffer_ = {};
+        buffer_free_list_.emplace_back(pending_destroy.index_);
+      }
+      return true;
+    }
+    return false;
+  });
+
+  std::erase_if(pending_destroy_images_, [&completed, this](auto& pending_destroy) {
+    if (pending_destroy.fence_value_ <= completed) {
+      if (images_[pending_destroy.index_].image_.image_ != VK_NULL_HANDLE) {
+        vmaDestroyImage(
+            memory_allocator_, images_[pending_destroy.index_].image_.image_,
+            images_[pending_destroy.index_].image_.allocation_);
+        images_[pending_destroy.index_].image_.image_ = {};
+        image_free_list_.emplace_back(pending_destroy.index_);
+      }
+      return true;
+    }
+    return false;
+  });
+
+  std::erase_if(pending_destroy_shader_modules_, [&completed, this](auto& pending_destroy) {
+    if (pending_destroy.fence_value_ <= completed) {
+      auto module{ std::move(shader_modules_[pending_destroy.index_].shader_.module_) };
+      shader_modules_[pending_destroy.index_].shader_.stage_ = ShaderStage::Unknown;
+      shader_module_free_list_.emplace_back(pending_destroy.index_);
       return true;
     }
     return false;
