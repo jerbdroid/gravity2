@@ -3,7 +3,7 @@
 #include "source/common/logging/logger.hpp"
 #include "source/common/scheduler/scheduler.hpp"
 #include "source/rendering/device/rendering_device.hpp"
-#include "source/servers/resource/resource_manager.hpp"
+#include "source/rendering/resource/resource_manager.hpp"
 
 #include <cstdint>
 #include <iostream>

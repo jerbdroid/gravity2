@@ -11,7 +11,7 @@ gravity_cc_library(
         "//source/common/scheduler",
         "//source/rendering/common:rendering_api",
         "//source/rendering/device:rendering_device",
-        "//source/servers/resource:resource_manager",
+        "//source/rendering/resource:resource_manager",
         "@boost.asio",
     ],
 )
