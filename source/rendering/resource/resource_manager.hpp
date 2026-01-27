@@ -1,11 +1,8 @@
 #pragma once
 
 #include "source/common/scheduler/scheduler.hpp"
-#include "source/rendering/common/rendering_api.hpp"
 
 #include <expected>
-#include <memory>
-#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -13,15 +10,15 @@ namespace gravity {
 
 struct ShaderResource {
   std::vector<uint32_t> spirv_;
+  HashType hash_;
 };
 
-struct ShaderKey {
+struct ShaderResourceDescription {
   std::string path;
-  ShaderStage stage;
 };
 
 struct ShaderResourceSlot {
-  ShaderKey key_;
+  ShaderResourceDescription key_;
   std::unique_ptr<ShaderResource> shader_resource_;
 
   size_t index_ = 0;
@@ -38,9 +35,9 @@ struct ShaderResourceHandle {
   size_t generation_;
 };
 
-struct ShaderKeyHash {
-  auto operator()(const ShaderKey& key) const -> size_t {
-    return std::hash<std::string>()(key.path) ^ (static_cast<size_t>(key.stage) << 1);
+struct ShaderResourceHash {
+  auto operator()(const ShaderResourceDescription& key) const -> HashType {
+    return std::hash<std::string>()(key.path);
   }
 };
 
@@ -51,22 +48,26 @@ class ResourceManager {
 
   ResourceManager(StrandGroup strands);
 
-  auto acquireShader(const ShaderKey& shader_key)
+  auto acquireShaderResource(const ShaderResourceDescription& shader_resource_description)
       -> boost::asio::awaitable<std::expected<ShaderResourceHandle, std::error_code>>;
-  auto releaseShader(ShaderResourceHandle resource_handle) -> boost::asio::awaitable<void>;
-  [[nodiscard]] auto getShader(ShaderResourceHandle resource_handle) const -> const ShaderResource&;
+  auto releaseShaderResource(ShaderResourceHandle shader_resource_handle)
+      -> boost::asio::awaitable<void>;
+  [[nodiscard]] auto getShader(ShaderResourceHandle shader_resource_handle) const
+      -> const ShaderResource&;
 
  private:
   StrandGroup strands_;
 
   // Shader Resource
-  std::vector<ShaderResourceSlot> shaders_resource_;
-  std::unordered_map<ShaderKey, ShaderResourceHandle, ShaderKeyHash> shader_resource_cache_;
+  std::vector<ShaderResourceSlot> shader_resources_;
+  std::unordered_map<ShaderResourceDescription, ShaderResourceHandle, ShaderResourceHash>
+      shader_resource_cache_;
   std::vector<size_t> shaders_resource_free_list_;
 
-  auto doAcquireShader(const ShaderKey& shader_key)
+  auto doAcquireShaderResource(const ShaderResourceDescription& shader_key)
       -> boost::asio::awaitable<std::expected<ShaderResourceHandle, std::error_code>>;
-  auto doReleaseShader(ShaderResourceHandle resource_handle) -> boost::asio::awaitable<void>;
+  auto doReleaseShaderResource(ShaderResourceHandle shader_resource_handle)
+      -> boost::asio::awaitable<void>;
 };
 
 }  // namespace gravity

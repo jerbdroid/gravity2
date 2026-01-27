@@ -41,17 +41,24 @@ void writeFlatBufferToFile(const std::string& filename, std::span<uint8_t> buffe
 
 auto getFileExtension(const std::string& filename) -> std::string;
 
-using Digest = uint64_t;
+using HashType = uint64_t;
 
-inline auto calculateDigest(const void* data, size_t size) -> Digest {
-  GRAVITY_TRACE("system.debug", "calculateDigest");
-  std::hash<std::string_view> hasher;
-  return hasher(std::string_view(reinterpret_cast<const char*>(data), size));
-}
-
-inline auto hashCombine(size_t lhs, size_t rhs) -> uint64_t {
+inline auto hashCombine(size_t lhs, size_t rhs) -> HashType {
   lhs ^= rhs + 0x9e3779b9 + (lhs << 6) + (lhs >> 2);
   return lhs;
+}
+
+constexpr HashType fnv_offset_basis = 14695981039346656037ULL;
+constexpr HashType fnv_prime = 1099511628211ULL;
+
+inline auto hash(std::span<const uint32_t> data, HashType offset_basis = fnv_offset_basis)
+    -> HashType {
+  HashType hash = fnv_offset_basis;
+  for (uint32_t word : data) {
+    hash ^= word;
+    hash *= fnv_prime;
+  }
+  return hash;
 }
 
 }  // namespace gravity

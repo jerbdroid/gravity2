@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <unordered_set>
 #include <vector>
@@ -118,15 +119,26 @@ class VulkanRenderingDevice : public RenderingDevice {
     size_t index_ = 0;
   };
 
-  struct Shader {
+  struct ShaderResource {
     vk::raii::ShaderModule module_;
     ShaderStage stage_ = ShaderStage::Unknown;
   };
 
   struct ShaderSlot {
-    Shader shader_;
+    ShaderDescription description_;
+
+    std::unique_ptr<ShaderResource> shader_;
+
     uint32_t generation_ = 0;
     size_t index_ = 0;
+    size_t reference_counter_ = 0;
+
+    bool loading_ = false;
+    bool loaded_ = false;
+  };
+
+  struct ShaderHash {
+    auto operator()(const ShaderDescription& description) const -> HashType;
   };
 
   WindowContext& window_context_;
@@ -199,6 +211,7 @@ class VulkanRenderingDevice : public RenderingDevice {
   std::vector<ShaderSlot> shader_modules_;
   std::vector<PendingDestroy> pending_destroy_shader_modules_;
   std::vector<size_t> shader_module_free_list_;
+  std::unordered_map<ShaderDescription, ShaderHandle, ShaderHash> shader_module_cache_;
 
   std::unordered_set<std::string> enabled_instance_extension_names_;
   std::unordered_set<std::string> enabled_instance_layer_names_;

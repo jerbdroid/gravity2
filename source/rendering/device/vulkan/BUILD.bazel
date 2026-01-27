@@ -14,6 +14,7 @@ gravity_cc_library(
         "//source/platform/window:glfw_window_context",
         "//source/rendering/common:rendering_api",
         "//source/rendering/device:rendering_device",
+        "@gsl",
         "@magic_enum",
         "@vulkan_windows//:vulkan_cc_library",
     ],

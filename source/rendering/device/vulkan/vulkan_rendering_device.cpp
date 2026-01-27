@@ -8,6 +8,7 @@
 #include "source/rendering/common/rendering_api.hpp"
 
 #include "GLFW/glfw3.h"
+#include "gsl/gsl"
 #include "magic_enum.hpp"
 #include "source/rendering/device/rendering_device.hpp"
 #include "vulkan/vulkan_core.h"
@@ -799,6 +800,12 @@ namespace gravity {
 using boost::asio::co_spawn;
 using boost::asio::use_awaitable;
 
+auto operator==(const ShaderDescription& description, const ShaderDescription& other_description)
+    -> bool {
+  return description.hash_ == other_description.hash_ &&
+         description.stage_ == other_description.stage_;
+}
+
 VulkanRenderingDevice::~VulkanRenderingDevice() {
   sync();
 
@@ -999,7 +1006,7 @@ auto VulkanRenderingDevice::destroySampler(SamplerHandle sampler_handle)
 auto VulkanRenderingDevice::createShader(ShaderDescription description)
     -> boost::asio::awaitable<std::expected<ShaderHandle, std::error_code>> {
   co_return co_await co_spawn(
-      strands_.getStrand(StrandLanes::Shader), doCreateShader(std::move(description)),
+      strands_.getStrand(StrandLanes::Shader), doCreateShader(description),
       boost::asio::use_awaitable);
 }
 
@@ -1008,6 +1015,13 @@ auto VulkanRenderingDevice::destroyShader(ShaderHandle shader_handle)
   co_return co_await co_spawn(
       strands_.getStrand(StrandLanes::Shader), doDestroyShader(shader_handle),
       boost::asio::use_awaitable);
+}
+
+auto VulkanRenderingDevice::ShaderHash::operator()(const ShaderDescription& description) const
+    -> HashType {
+  HashType hash = std::hash<int>{}(static_cast<int>(description.stage_));
+  hashCombine(hash, description.hash_);
+  return hash;
 }
 
 auto VulkanRenderingDevice::doInitialize() -> boost::asio::awaitable<std::error_code> {
@@ -1327,40 +1341,77 @@ auto VulkanRenderingDevice::doDestroySampler(SamplerHandle image_handle)
 
 auto VulkanRenderingDevice::doCreateShader(ShaderDescription description)
     -> boost::asio::awaitable<std::expected<ShaderHandle, std::error_code>> {
-  LOG_DEBUG(
-      "create shader; entry_point: {}, shader_type: {}, shader_module_allocator_size: {}",
-      description.entry_point_, magic_enum::enum_name(description.stage_), shader_modules_.size());
 
-  vk::ShaderModuleCreateInfo createInfo{ vk::ShaderModuleCreateFlags(), description.spirv_ };
+  constexpr std::chrono::microseconds WaitDuration{ 50 };
+  auto executor = co_await boost::asio::this_coro::executor;
 
-  auto shader_module_expect{ device_->createShaderModule(createInfo) };
-  if (!shader_module_expect) {
-    LOG_ERROR(
-        "created shader failed; entry_point: {}, shader_type: {}, shader_module_allocator_size: {}",
-        description.entry_point_, magic_enum::enum_name(description.stage_),
-        shader_modules_.size());
-    co_return std::unexpected(Error::InternalError);
+  if (auto iterator = shader_module_cache_.find(description);
+      iterator != shader_module_cache_.end()) {
+    assert(iterator->second.generation_ == shader_modules_[iterator->second.index_].generation_);
+    shader_modules_[iterator->second.index_].reference_counter_++;
+
+    while (shader_modules_[iterator->second.index_].loading_) {
+      co_await boost::asio::steady_timer(executor, WaitDuration)
+          .async_wait(boost::asio::use_awaitable);
+    }
+    assert(shader_modules_[iterator->second.index_].loaded_);
+    LOG_DEBUG(
+        "create shader cache hit; shader_type: {}, index: {}, generation: {}, "
+        "shader_module_allocator_size: {}",
+        magic_enum::enum_name(shader_modules_[iterator->second.index_].shader_->stage_),
+        shader_modules_[iterator->second.index_].index_,
+        shader_modules_[iterator->second.index_].generation_, shader_modules_.size());
+    co_return iterator->second;
   }
 
   size_t slot_index{ 0 };
   if (!shader_module_free_list_.empty()) {
     slot_index = shader_module_free_list_.back();
     shader_module_free_list_.pop_back();
-    shader_modules_[slot_index].shader_.module_ = std::move(*shader_module_expect);
   } else {
-    shader_modules_.emplace_back(
-        ShaderSlot{ .shader_ = { .module_ = std::move(*shader_module_expect),
-                                 .stage_ = description.stage_ } });
+    shader_modules_.emplace_back();
     slot_index = shader_modules_.size() - 1;
-    shader_modules_[slot_index].index_ = slot_index;
   }
 
-  shader_modules_[slot_index].shader_.stage_ = description.stage_;
+  auto guard = gsl::finally([&] {
+    if (shader_modules_[slot_index].loading_) {
+      LOG_DEBUG("creating shader aborted");
+      shader_module_cache_.erase(description);
+      shader_module_free_list_.push_back(slot_index);
+    }
+  });
+  shader_modules_[slot_index].index_ = slot_index;
+  shader_modules_[slot_index].loading_ = true;
+
+  auto [iter, inserted] = shader_module_cache_.emplace(
+      description, ShaderHandle{ .index_ = shader_modules_[slot_index].index_,
+                                 .generation_ = shader_modules_[slot_index].generation_ });
 
   LOG_DEBUG(
-      "created shader success; entry_point: {}, shader_type: {}, index: {}, generation: {}, "
+      "create shader; shader_type: {}, shader_module_allocator_size: {}",
+      magic_enum::enum_name(description.stage_), shader_modules_.size());
+
+  vk::ShaderModuleCreateInfo createInfo{ vk::ShaderModuleCreateFlags(), description.spirv_ };
+
+  auto shader_module_expect{ device_->createShaderModule(createInfo) };
+  if (!shader_module_expect) {
+    LOG_ERROR(
+        "created shader failed;  shader_type: {}, shader_module_allocator_size: "
+        "{}",
+        magic_enum::enum_name(description.stage_), shader_modules_.size());
+    co_return std::unexpected(Error::InternalError);
+  }
+
+  shader_modules_[slot_index].shader_ =
+      std::make_unique<ShaderResource>(std::move(*shader_module_expect), description.stage_);
+  shader_modules_[slot_index].reference_counter_++;
+  shader_modules_[slot_index].loaded_ = true;
+  shader_modules_[slot_index].loading_ = false;
+
+  LOG_DEBUG(
+      "created shader success; shader_type: {}, index: {}, generation: {}, "
       "shader_module_allocator_size: {}",
-      description.entry_point_, magic_enum::enum_name(description.stage_),
+      magic_enum::enum_name(shader_modules_[slot_index].shader_->stage_),
       shader_modules_[slot_index].index_, shader_modules_[slot_index].generation_,
       shader_modules_.size());
 
@@ -1378,10 +1429,13 @@ auto VulkanRenderingDevice::doDestroyShader(ShaderHandle shader_handle)
 
   assert(shader_handle.generation_ == shader_modules_[shader_handle.index_].generation_);
 
-  shader_handle.generation_++;
+  if (shader_modules_[shader_handle.index_].reference_counter_-- == 0) {
+    shader_modules_[shader_handle.index_].generation_++;
+    shader_modules_[shader_handle.index_].loaded_ = false;
 
-  pending_destroy_shader_modules_.emplace_back(
-      PendingDestroy{ .index_ = shader_handle.index_, .fence_value_ = timeline_value_ });
+    pending_destroy_shader_modules_.emplace_back(
+        PendingDestroy{ .index_ = shader_handle.index_, .fence_value_ = timeline_value_ });
+  }
 
   co_return Error::OK;
 }
@@ -1974,8 +2028,8 @@ void VulkanRenderingDevice::collectPendingDestroy() {
 
   std::erase_if(pending_destroy_shader_modules_, [&completed, this](auto& pending_destroy) {
     if (pending_destroy.fence_value_ <= completed) {
-      auto module{ std::move(shader_modules_[pending_destroy.index_].shader_.module_) };
-      shader_modules_[pending_destroy.index_].shader_.stage_ = ShaderStage::Unknown;
+      shader_modules_[pending_destroy.index_].shader_.release();
+      shader_modules_[pending_destroy.index_].index_ = 0;
       shader_module_free_list_.emplace_back(pending_destroy.index_);
       return true;
     }

@@ -1,14 +1,14 @@
 #pragma once
 
-#include "boost/asio/awaitable.hpp"
+#include "source/common/utilities.hpp"
 #include "source/rendering/common/rendering_api.hpp"
 
-#include "boost/asio.hpp"
+#include "boost/asio/awaitable.hpp"
 
 #include <cstddef>
 #include <expected>
-#include <system_error>
 #include <span>
+#include <system_error>
 
 namespace gravity {
 
@@ -91,12 +91,12 @@ struct SamplerHandle {
 struct ShaderDescription {
   ShaderStage stage_ = ShaderStage::Unknown;
   std::span<const uint32_t> spirv_;
-  std::string entry_point_ = "main";
+  HashType hash_;
 };
 
 struct ShaderHandle {
-  size_t index_;
-  size_t generation_;
+  size_t index_ = 0;
+  size_t generation_ = 0;
 };
 
 class RenderingDevice {
