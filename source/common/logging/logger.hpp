@@ -14,14 +14,23 @@
 namespace gravity {
 
 auto setupAsyncLogger() -> std::error_code;
+auto getOrCreateLogger(const std::string& name) -> std::shared_ptr<spdlog::logger>;
 
 }  // namespace gravity
 
-// NOLINTBEGIN(cppcoreguidelines-macro-usage)
-#define LOG_INFO(...) SPDLOG_INFO(__VA_ARGS__)
-#define LOG_CRITICAL(...) SPDLOG_CRITICAL(__VA_ARGS__)
-#define LOG_WARN(...) SPDLOG_WARN(__VA_ARGS__)
-#define LOG_ERROR(...) SPDLOG_ERROR(__VA_ARGS__)
-#define LOG_DEBUG(...) SPDLOG_DEBUG(__VA_ARGS__)
-#define LOG_TRACE(...) SPDLOG_TRACE(__VA_ARGS__)
-// NOLINTEND(cppcoreguidelines-macro-usage)
+// Each .cpp file can define its own GRAVITY_MODULE_NAME before including this header,
+// or you can default it to "default"
+#ifndef GRAVITY_MODULE_NAME
+#define GRAVITY_MODULE_NAME "default"
+#endif
+
+// Internal helper to fetch the correct logger for the current module
+#define GET_MODULE_LOGGER() gravity::getOrCreateLogger(GRAVITY_MODULE_NAME)
+
+// Updated Macros using SPDLOG_LOGGER_CALL for source location support (%s:%#)
+#define LOG_TRACE(...) SPDLOG_LOGGER_TRACE(GET_MODULE_LOGGER(), __VA_ARGS__)
+#define LOG_DEBUG(...) SPDLOG_LOGGER_DEBUG(GET_MODULE_LOGGER(), __VA_ARGS__)
+#define LOG_INFO(...) SPDLOG_LOGGER_INFO(GET_MODULE_LOGGER(), __VA_ARGS__)
+#define LOG_WARN(...) SPDLOG_LOGGER_WARN(GET_MODULE_LOGGER(), __VA_ARGS__)
+#define LOG_ERROR(...) SPDLOG_LOGGER_ERROR(GET_MODULE_LOGGER(), __VA_ARGS__)
+#define LOG_CRITICAL(...) SPDLOG_LOGGER_CRITICAL(GET_MODULE_LOGGER(), __VA_ARGS__)

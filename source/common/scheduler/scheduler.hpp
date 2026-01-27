@@ -1,6 +1,5 @@
 #pragma once
 
-#include "source/common/logging/logger.hpp"
 #include "source/common/utilities.hpp"
 
 #include "absl/strings/str_cat.h"
@@ -17,25 +16,9 @@ struct Worker {
   boost::asio::executor_work_guard<decltype(io_context_.get_executor())> io_guard_;
   std::vector<std::thread> thread_;
 
-  Worker(size_t threads, std::string_view name) : io_guard_(io_context_.get_executor()) {
-    for (size_t i = 0; i < threads; ++i) {
-      thread_.emplace_back([name = absl::StrCat(name, "-", i), this] {
-        LOG_TRACE("{} run() entered", name);
-        io_context_.run();
-        LOG_TRACE("{} run() exited", name);
-      });
-      setThreadName(thread_.back(), absl::StrCat(name, "-", i));
-    }
-  }
+  Worker(size_t threads, std::string_view name);
 
-  ~Worker() {
-    io_guard_.reset();
-    for (auto& thread : thread_) {
-      if (thread.joinable()) {
-        thread.join();
-      }
-    }
-  }
+  ~Worker();
 };
 
 template <typename System>

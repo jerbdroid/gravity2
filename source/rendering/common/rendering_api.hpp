@@ -95,4 +95,17 @@ enum class ShaderStage : uint8_t {
 
 constexpr auto enable_bitmask_operators(ShaderStage) -> bool;
 
+enum class VertexFormat : uint8_t {
+  Float1,
+  Float2,
+  Float3,
+  Float4,
+  Uint32,
+};
+
+enum class VertexInputRate : uint8_t {
+  Vertex,
+  Instance,
+};
+
 }  // namespace gravity

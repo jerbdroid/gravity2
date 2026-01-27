@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <expected>
 #include <system_error>
+#include <span>
 
 namespace gravity {
 
@@ -44,6 +45,23 @@ struct ImageHandle {
   size_t generation_;
 };
 
+struct VertexAttribute {
+  uint32_t location;
+  VertexFormat format;
+  uint32_t offset;
+};
+
+struct VertexBinding {
+  uint32_t binding;
+  uint32_t stride;
+  VertexInputRate input_rate;
+};
+
+struct VertexLayout {
+  std::vector<VertexBinding> bindings;
+  std::vector<VertexAttribute> attributes;
+};
+
 struct SamplerDescription {
   SamplerFilter magnification_filter_;
   SamplerFilter minification_filter_;
@@ -72,7 +90,7 @@ struct SamplerHandle {
 
 struct ShaderDescription {
   ShaderStage stage_ = ShaderStage::Unknown;
-  std::vector<uint32_t> spirv_;
+  std::span<const uint32_t> spirv_;
   std::string entry_point_ = "main";
 };
 

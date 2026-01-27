@@ -5,7 +5,6 @@
 #include "source/platform/window/window_context.hpp"
 #include "source/rendering/device/rendering_device.hpp"
 
-
 #include "vma/vk_mem_alloc.h"
 #include "vulkan/vulkan_core.h"
 #include "vulkan/vulkan_raii.hpp"

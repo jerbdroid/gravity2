@@ -20,6 +20,9 @@ auto main() -> int {
     return err.value();
   }
 
+  gravity::getOrCreateLogger("vulkan")->set_level(spdlog::level::trace);
+  gravity::getOrCreateLogger("scheduler")->set_level(spdlog::level::err);
+
   Scheduler scheduler{};
 
   GlfwWindowContext window_context{};
@@ -39,8 +42,10 @@ auto main() -> int {
     LOG_ERROR("Failed to initialize rendering device: {}", err.value());
     return err.value();
   }
-  RenderingServer rendering_server{ vulkan_rendering_device,
-                                    scheduler.makeStrands<RenderingServer>() };
+  RenderingServer rendering_server{
+    scheduler,
+    vulkan_rendering_device,
+  };
 
   rendering_server.draw();
 

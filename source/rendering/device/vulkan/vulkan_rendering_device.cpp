@@ -27,6 +27,8 @@
 #include <utility>
 #include <vector>
 
+#define GRAVITY_MODULE_NAME "vulkan"
+
 namespace {
 
 using namespace gravity;

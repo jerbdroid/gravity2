@@ -11,6 +11,6 @@ refresh_compile_commands(
         "//:main": "--compiler=clang-cl",
         "//source/common/event:main": "--compiler=clang-cl",
         "//source/servers/rendering:example_rendering_server": "--compiler=clang-cl",
-        "//source/rendering/device:example_rendering_device": "--compiler=clang-cl",
+        # "//source/rendering/device:example_rendering_device": "--compiler=clang-cl",
     },
 )

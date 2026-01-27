@@ -2,6 +2,7 @@ load("//bazel:gravity_build_system.bzl", "gravity_cc_library")
 
 gravity_cc_library(
     name = "scheduler",
+    srcs = ["scheduler.cpp"],
     hdrs = ["scheduler.hpp"],
     visibility = [
         "//visibility:public",

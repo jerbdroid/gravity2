@@ -11,17 +11,17 @@ gravity_cc_library(
     ],
 )
 
-gravity_cc_binary(
-    name = "example_rendering_device",
-    srcs = ["example_rendering_device.cpp"],
-    data = [],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":rendering_device",
-        "//source/common/logging:logger",
-        "//source/platform/window:glfw_window_context",
-        "//source/rendering/backends/vulkan:vulkan_backend",
-        "//source/rendering/common:rendering_api",
-        "//source/rendering/contexts/vulkan:vulkan_context",
-    ],
-)
+# gravity_cc_binary(
+#     name = "example_rendering_device",
+#     srcs = ["example_rendering_device.cpp"],
+#     data = [],
+#     visibility = ["//visibility:public"],
+#     deps = [
+#         ":rendering_device",
+#         "//source/common/logging:logger",
+#         "//source/platform/window:glfw_window_context",
+#         "//source/rendering/backends/vulkan:vulkan_backend",
+#         "//source/rendering/common:rendering_api",
+#         "//source/rendering/contexts/vulkan:vulkan_context",
+#     ],
+# )

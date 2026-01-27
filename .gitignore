@@ -46,3 +46,5 @@ AssimpLog.txt
 prebuilt
 *.pftrace
 *.big
+
+.env

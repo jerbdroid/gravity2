@@ -6,49 +6,52 @@
 #include "spdlog/sinks/rotating_file_sink.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 
+#include <mutex>
+
 namespace gravity {
 
-auto setupAsyncLogger() -> std::error_code {
-  static std::shared_ptr<spdlog::logger> logger;
+// Shared sinks and config
+static std::shared_ptr<spdlog::sinks::sink> global_sink;
+static bool is_initialized = false;
 
-  if (logger != nullptr) {
-    LOG_WARN("async logger already installed");
+auto setupAsyncLogger() -> std::error_code {
+  if (is_initialized) {
     return Error::AlreadyExistsError;
   }
 
-  // const auto& logger_config{LoggerConfig::getInstance()};
+  // 1. Initialize shared sink (Console/File)
+  global_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
 
-  spdlog::sink_ptr sink{nullptr};
+  // 2. Initialize global thread pool for async logging
+  spdlog::init_thread_pool(16384, 1);
 
-  // if (logger_config.useFile()) {
-  //   sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-  //       "logs/gravity.log", logger_config.maxFileSize(),
-  //       logger_config.maxFileCount());
-  // } else {
-  sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-  // }
+  // 3. Set global formatting pattern
+  spdlog::set_pattern("[%^%l%$][%t][%n][%s:%#] %v");  // Added [%n] for module name
 
-  // if (logger_config.useSync()) {
-  spdlog::init_thread_pool(16384, // logger_config.asyncQueueSize(),
-                           1      // logger_config.asyncBackingThreads()
-  );
-
-  logger = std::make_shared<spdlog::async_logger>(
-      "default", sink, spdlog::thread_pool(),
-      spdlog::async_overflow_policy::discard_new);
-  // } else {
-  //   logger = std::make_shared<spdlog::logger>("default", sink);
-  // }
-
-  spdlog::set_default_logger(logger);
-
-  // spdlog::set_level(spdlog::level::from_str(logger_config.logLevel()));
-
-  spdlog::set_level(spdlog::level::trace);
-
-  spdlog::set_pattern("[%^%l%$][%t][%s:%#] %v");
-
+  is_initialized = true;
   return Error::OK;
 }
 
-} // namespace gravity
+static std::mutex logger_mutex;
+
+// Helper to get or create a module-specific logger
+auto getOrCreateLogger(const std::string& name) -> std::shared_ptr<spdlog::logger> {
+  auto logger = spdlog::get(name);
+  if (!logger) {
+    std::lock_guard<std::mutex> lock(logger_mutex);
+    auto logger = spdlog::get(name);
+    if (!logger) {
+      // Create new async logger using the shared thread pool and sink
+      logger = std::make_shared<spdlog::async_logger>(
+          name, global_sink, spdlog::thread_pool(), spdlog::async_overflow_policy::discard_new);
+
+      // Set module-specific default level (can be overridden later)
+      logger->set_level(spdlog::level::trace);
+      spdlog::register_logger(logger);
+    }
+    return logger;
+  }
+  return logger;
+}
+
+}  // namespace gravity

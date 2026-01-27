@@ -3,6 +3,7 @@
 #include "source/common/logging/logger.hpp"
 #include "source/common/scheduler/scheduler.hpp"
 #include "source/rendering/device/rendering_device.hpp"
+#include "source/servers/resource/resource_manager.hpp"
 
 #include <cstdint>
 #include <iostream>
@@ -33,13 +34,21 @@ class RenderingServer {
   enum class StrandLanes : size_t { Main, _Count };
   using StrandGroup = StrandGroup<RenderingServer>;
 
-  RenderingServer(RenderingDevice& device, StrandGroup strands)
-      : device_{ device }, strands_{ std::move(strands) } {}
+  RenderingServer(Scheduler& scheduler, RenderingDevice& device)
+      : device_{ device },
+        strands_{ scheduler.makeStrands<RenderingServer>() },
+        resources_{ scheduler.makeStrands<ResourceManager>() } {}
 
   auto draw() {
     co_spawn(strands_.getStrand(StrandLanes::Main), task1(), detached);
     co_spawn(strands_.getStrand(StrandLanes::Main), oof(), detached);
-    loadShaderModule("shaders/simple_shader.vert.spv");
+    co_spawn(
+        strands_.getStrand(StrandLanes::Main), loadShaderModule("shaders/simple_shader.vert.spv"),
+        detached);
+    co_spawn(strands_.getExecutor(), loadShaderModule("shaders/simple_shader.vert.spv"), detached);
+    co_spawn(strands_.getExecutor(), loadShaderModule("shaders/simple_shader.vert.spv"), detached);
+    co_spawn(strands_.getExecutor(), loadShaderModule("shaders/simple_shader.vert.spv"), detached);
+    co_spawn(strands_.getExecutor(), loadShaderModule("shaders/simple_shader.vert.spv"), detached);
   }
 
   ~RenderingServer() = default;
@@ -52,46 +61,37 @@ class RenderingServer {
     co_await device_.destroyBuffer(handle.value());
   }
 
-  void loadShaderModule(const std::string& path) {
-    auto file = std::make_shared<boost::asio::stream_file>(
-        strands_.getExecutor(), path, boost::asio::stream_file::read_only);
+  auto loadShaderModule(std::string path) -> boost::asio::awaitable<void> {
 
-    auto dynamic_buf = std::make_shared<boost::asio::streambuf>();
+    ShaderKey key{ .path = path, .stage = ShaderStage::Vertex };
 
-    boost::asio::async_read(
-        *file, *dynamic_buf, boost::asio::transfer_all(),
-        boost::asio::bind_executor(
-            strands_.getStrand(StrandLanes::Main),
-            [file, dynamic_buf, this](const boost::system::error_code& ec, std::size_t bytes) {
-              if (ec == boost::asio::error::eof || !ec) {
-                std::istream is(dynamic_buf.get());
-                std::vector<char> buffer(
-                    (std::istreambuf_iterator<char>(is)), std::istreambuf_iterator<char>());
-                if (buffer.size() % 4 != 0) {
-                  LOG_ERROR("Shader file size is not multiple of 4 bytes");
-                  return;
-                }
-                std::vector<uint32_t> spirv(buffer.size() / 4);
-                std::memcpy(spirv.data(), buffer.data(), buffer.size());
+    auto vertHandle = co_await resources_.acquireShader(key);
+    // auto  fragHandle = co_await resources_.loadShader(path);
+    if (!vertHandle) {
+      LOG_ERROR("failed to load shader resource");
+      co_return;
+    }
 
-                ShaderDescription description{
-                  .stage_ = ShaderStage::Vertex,
-                  .spirv_ = std::move(spirv),
-                  .entry_point_ = "main",
-                };
+    const auto& vert = resources_.getShader(vertHandle.value());
+    // const auto& frag = resources_.getShader(fragHandle);
 
-                boost::asio::co_spawn(
-                    strands_.getStrand(StrandLanes::Main),
-                    device_.createShader(std::move(description)), boost::asio::detached);
-              } else {
-                LOG_ERROR("shader module read error: {}", ec.message());
-              }
-            }));
+    ShaderDescription description{
+      .stage_ = ShaderStage::Vertex,
+      .spirv_ = vert.spirv_,
+      .entry_point_ = "main",
+    };
+
+    co_await device_.createShader(std::move(description));
+
+    co_await resources_.releaseShader(vertHandle.value());
+    // resources_.releaseShader(fragHandle);
   }
 
  private:
   RenderingDevice& device_;
+
   StrandGroup strands_;
+  ResourceManager resources_;
 };
 
 }  // namespace gravity
