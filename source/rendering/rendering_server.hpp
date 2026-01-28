@@ -1,9 +1,10 @@
 #pragma once
 
-#include <cstdint>
 #include "source/common/scheduler/scheduler.hpp"
 #include "source/rendering/device/rendering_device.hpp"
-#include "source/rendering/resource/resource_manager.hpp"
+#include "source/rendering/resource_manager.hpp"
+
+#include <cstdint>
 
 namespace gravity {
 

@@ -8,10 +8,10 @@ gravity_cc_library(
         "//visibility:public",
     ],
     deps = [
+        ":resource_manager",
         "//source/common/scheduler",
         "//source/rendering/common:rendering_api",
         "//source/rendering/device:rendering_device",
-        "//source/rendering/resource:resource_manager",
         "@boost.asio",
     ],
 )
@@ -27,5 +27,20 @@ gravity_cc_binary(
         "//source/platform/window:glfw_window_context",
         "//source/rendering/device:rendering_device",
         "//source/rendering/device/vulkan:vulkan_rendering_device",
+    ],
+)
+
+gravity_cc_library(
+    name = "resource_manager",
+    srcs = ["resource_manager.cpp"],
+    hdrs = ["resource_manager.hpp"],
+    visibility = [
+        "//visibility:public",
+    ],
+    deps = [
+        "//source/common/scheduler",
+        "//source/rendering/common:rendering_api",
+        "@boost.asio",
+        "@gsl",
     ],
 )
