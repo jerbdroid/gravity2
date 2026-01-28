@@ -3,8 +3,9 @@
 #include "source/common/logging/logger.hpp"
 #include "source/common/scheduler/scheduler.hpp"
 #include "source/platform/window/glfw_window_context.hpp"
-#include "source/rendering/device/rendering_device.hpp"
 #include "source/rendering/device/vulkan/vulkan_rendering_device.hpp"
+
+#include "boost/asio/detached.hpp"
 
 #include <thread>
 
@@ -47,7 +48,9 @@ auto main() -> int {
     vulkan_rendering_device,
   };
 
-  rendering_server.draw();
+  co_spawn(
+      scheduler.getStrand(Scheduler::StrandLanes::Main), rendering_server.draw(),
+      boost::asio::detached);
 
   std::this_thread::sleep_for(5s);
 
