@@ -38,21 +38,21 @@ class VulkanRenderingDevice : public RenderingDevice {
   auto prepareBuffers() -> boost::asio::awaitable<std::error_code>;
   auto swapBuffers() -> boost::asio::awaitable<std::error_code>;
 
-  auto createBuffer(const BufferDescription& description)
+  auto createBuffer(const BufferDescriptor& descriptor)
       -> boost::asio::awaitable<std::expected<BufferHandle, std::error_code>> override;
   auto destroyBuffer(BufferHandle buffer_handle)
       -> boost::asio::awaitable<std::error_code> override;
 
-  auto createImage(const ImageDescription& description)
+  auto createImage(const ImageDescriptor& descriptor)
       -> boost::asio::awaitable<std::expected<ImageHandle, std::error_code>> override;
   auto destroyImage(ImageHandle image_handle) -> boost::asio::awaitable<std::error_code> override;
 
-  auto createSampler(const SamplerDescription& description)
+  auto createSampler(const SamplerDescriptor& descriptor)
       -> boost::asio::awaitable<std::expected<SamplerHandle, std::error_code>> override;
   auto destroySampler(SamplerHandle sampler_handle)
       -> boost::asio::awaitable<std::error_code> override;
 
-  auto createShader(ShaderDescription description)
+  auto createShader(ShaderDescriptor descriptor)
       -> boost::asio::awaitable<std::expected<ShaderHandle, std::error_code>> override;
   auto destroyShader(ShaderHandle shader_handle)
       -> boost::asio::awaitable<std::error_code> override;
@@ -125,7 +125,7 @@ class VulkanRenderingDevice : public RenderingDevice {
   };
 
   struct ShaderSlot {
-    ShaderDescription description_;
+    ShaderDescriptor description_;
 
     std::unique_ptr<ShaderResource> shader_;
 
@@ -138,7 +138,7 @@ class VulkanRenderingDevice : public RenderingDevice {
   };
 
   struct ShaderHash {
-    auto operator()(const ShaderDescription& description) const -> HashType;
+    auto operator()(const ShaderDescriptor& descriptor) const -> HashType;
   };
 
   WindowContext& window_context_;
@@ -211,23 +211,23 @@ class VulkanRenderingDevice : public RenderingDevice {
   std::vector<ShaderSlot> shader_modules_;
   std::vector<PendingDestroy> pending_destroy_shader_modules_;
   std::vector<size_t> shader_module_free_list_;
-  std::unordered_map<ShaderDescription, ShaderHandle, ShaderHash> shader_module_cache_;
+  std::unordered_map<ShaderDescriptor, ShaderHandle, ShaderHash> shader_module_cache_;
 
   std::unordered_set<std::string> enabled_instance_extension_names_;
   std::unordered_set<std::string> enabled_instance_layer_names_;
   std::unordered_set<std::string> enabled_device_extension_names_;
 
   auto doInitialize() -> boost::asio::awaitable<std::error_code>;
-  auto doCreateBuffer(BufferDescription description)
+  auto doCreateBuffer(BufferDescriptor descriptor)
       -> boost::asio::awaitable<std::expected<BufferHandle, std::error_code>>;
   auto doDestroyBuffer(BufferHandle buffer_handle) -> boost::asio::awaitable<std::error_code>;
-  auto doCreateImage(ImageDescription description)
+  auto doCreateImage(ImageDescriptor descriptor)
       -> boost::asio::awaitable<std::expected<ImageHandle, std::error_code>>;
   auto doDestroyImage(ImageHandle image_handle) -> boost::asio::awaitable<std::error_code>;
-  auto doCreateSampler(SamplerDescription description)
+  auto doCreateSampler(SamplerDescriptor descriptor)
       -> boost::asio::awaitable<std::expected<SamplerHandle, std::error_code>>;
   auto doDestroySampler(SamplerHandle image_handle) -> boost::asio::awaitable<std::error_code>;
-  auto doCreateShader(ShaderDescription description)
+  auto doCreateShader(ShaderDescriptor descriptor)
       -> boost::asio::awaitable<std::expected<ShaderHandle, std::error_code>>;
   auto doDestroyShader(ShaderHandle shader_handle) -> boost::asio::awaitable<std::error_code>;
 

@@ -5,6 +5,7 @@ module(
 
 bazel_dep(name = "boost.asio", version = "1.89.0.bcr.2")
 bazel_dep(name = "boost.scope_exit", version = "1.89.0.bcr.2")
+bazel_dep(name = "boost.json", version = "1.89.0.bcr.2")
 bazel_dep(name = "gsl", version = "4.2.1")
 
 # This forces all dependencies to use the newer version

@@ -1,6 +1,8 @@
 #pragma once
 
+#include "asset_manager.hpp"
 #include "source/common/scheduler/scheduler.hpp"
+#include "source/rendering/asset_manager.hpp"
 #include "source/rendering/device/rendering_device.hpp"
 #include "source/rendering/resource_manager.hpp"
 
@@ -25,15 +27,20 @@ class RenderingServer {
         strands_{ scheduler.makeStrands<RenderingServer>() },
         resources_{ scheduler.makeStrands<ResourceManager>() } {}
 
+  auto initialize() -> boost::asio::awaitable<std::error_code>;
+
   auto draw() -> boost::asio::awaitable<void>;
 
-  auto loadShaderModule(std::string path) -> boost::asio::awaitable<void>;
+  auto loadAsset(AssetId asset_id) -> boost::asio::awaitable<std::error_code>;
 
  private:
   RenderingDevice& device_;
-
   StrandGroup strands_;
+  AssetManager assets_;
   ResourceManager resources_;
+
+  auto loadShaderModule(const ShaderAssetDescriptor& shader_asset_descriptor)
+      -> boost::asio::awaitable<void>;
 };
 
 }  // namespace gravity

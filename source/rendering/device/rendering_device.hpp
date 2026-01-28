@@ -1,7 +1,7 @@
 #pragma once
 
 #include "source/common/utilities.hpp"
-#include "source/rendering/common/rendering_api.hpp"
+#include "source/rendering/common/rendering_type.hpp"
 
 #include "boost/asio/awaitable.hpp"
 
@@ -18,13 +18,13 @@ struct Extent {
   uint32_t depth_;
 };
 
-struct BufferDescription {
+struct BufferDescriptor {
   size_t size_;
   BufferUsage usage_;
   Visibility visibility_;
 };
 
-struct ImageDescription {
+struct ImageDescriptor {
   Extent extent_ = { .width_ = 0, .height_ = 0, .depth_ = 1 };
   uint32_t layers_ = 1;
   uint32_t mip_level_ = 1;
@@ -62,7 +62,7 @@ struct VertexLayout {
   std::vector<VertexAttribute> attributes;
 };
 
-struct SamplerDescription {
+struct SamplerDescriptor {
   SamplerFilter magnification_filter_;
   SamplerFilter minification_filter_;
   SamplerMipMapMode mipmap_mode_;
@@ -88,7 +88,7 @@ struct SamplerHandle {
   size_t generation_;
 };
 
-struct ShaderDescription {
+struct ShaderDescriptor {
   ShaderStage stage_ = ShaderStage::Unknown;
   std::span<const uint32_t> spirv_;
   HashType hash_;
@@ -105,22 +105,22 @@ class RenderingDevice {
 
   virtual auto initialize() -> boost::asio::awaitable<std::error_code> = 0;
 
-  virtual auto createBuffer(const BufferDescription& description)
+  virtual auto createBuffer(const BufferDescriptor& descriptor)
       -> boost::asio::awaitable<std::expected<BufferHandle, std::error_code>> = 0;
   virtual auto destroyBuffer(BufferHandle buffer_handle)
       -> boost::asio::awaitable<std::error_code> = 0;
 
-  virtual auto createImage(const ImageDescription& description)
+  virtual auto createImage(const ImageDescriptor& descriptor)
       -> boost::asio::awaitable<std::expected<ImageHandle, std::error_code>> = 0;
   virtual auto destroyImage(ImageHandle image_handle)
       -> boost::asio::awaitable<std::error_code> = 0;
 
-  virtual auto createSampler(const SamplerDescription& description)
+  virtual auto createSampler(const SamplerDescriptor& descriptor)
       -> boost::asio::awaitable<std::expected<SamplerHandle, std::error_code>> = 0;
   virtual auto destroySampler(SamplerHandle sampler_handler)
       -> boost::asio::awaitable<std::error_code> = 0;
 
-  virtual auto createShader(ShaderDescription description)
+  virtual auto createShader(ShaderDescriptor descriptor)
       -> boost::asio::awaitable<std::expected<ShaderHandle, std::error_code>> = 0;
   virtual auto destroyShader(ShaderHandle shader_handle)
       -> boost::asio::awaitable<std::error_code> = 0;

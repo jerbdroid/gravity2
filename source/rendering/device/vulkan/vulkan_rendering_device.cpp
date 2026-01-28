@@ -5,7 +5,7 @@
 #include "source/common/logging/logger.hpp"
 #include "source/common/templates/bitmask.hpp"
 #include "source/platform/window/window_context.hpp"
-#include "source/rendering/common/rendering_api.hpp"
+#include "source/rendering/common/rendering_type.hpp"
 
 #include "GLFW/glfw3.h"
 #include "gsl/gsl"
@@ -800,10 +800,10 @@ namespace gravity {
 using boost::asio::co_spawn;
 using boost::asio::use_awaitable;
 
-auto operator==(const ShaderDescription& description, const ShaderDescription& other_description)
+auto operator==(const ShaderDescriptor& descriptor, const ShaderDescriptor& other_description)
     -> bool {
-  return description.hash_ == other_description.hash_ &&
-         description.stage_ == other_description.stage_;
+  return descriptor.hash_ == other_description.hash_ &&
+         descriptor.stage_ == other_description.stage_;
 }
 
 VulkanRenderingDevice::~VulkanRenderingDevice() {
@@ -961,10 +961,10 @@ auto VulkanRenderingDevice::swapBuffers() -> boost::asio::awaitable<std::error_c
   co_return Error::OK;
 }
 
-auto VulkanRenderingDevice::createBuffer(const BufferDescription& description)
+auto VulkanRenderingDevice::createBuffer(const BufferDescriptor& descriptor)
     -> boost::asio::awaitable<std::expected<BufferHandle, std::error_code>> {
   co_return co_await co_spawn(
-      strands_.getStrand(StrandLanes::Buffer), doCreateBuffer(description),
+      strands_.getStrand(StrandLanes::Buffer), doCreateBuffer(descriptor),
       boost::asio::use_awaitable);
 }
 
@@ -975,10 +975,10 @@ auto VulkanRenderingDevice::destroyBuffer(BufferHandle buffer_handle)
       boost::asio::use_awaitable);
 }
 
-auto VulkanRenderingDevice::createImage(const ImageDescription& description)
+auto VulkanRenderingDevice::createImage(const ImageDescriptor& descriptor)
     -> boost::asio::awaitable<std::expected<ImageHandle, std::error_code>> {
   co_return co_await co_spawn(
-      strands_.getStrand(StrandLanes::Buffer), doCreateImage(description),
+      strands_.getStrand(StrandLanes::Buffer), doCreateImage(descriptor),
       boost::asio::use_awaitable);
 }
 
@@ -989,10 +989,10 @@ auto VulkanRenderingDevice::destroyImage(ImageHandle image_handle)
       boost::asio::use_awaitable);
 }
 
-auto VulkanRenderingDevice::createSampler(const SamplerDescription& description)
+auto VulkanRenderingDevice::createSampler(const SamplerDescriptor& descriptor)
     -> boost::asio::awaitable<std::expected<SamplerHandle, std::error_code>> {
   co_return co_await co_spawn(
-      strands_.getStrand(StrandLanes::Sampler), doCreateSampler(description),
+      strands_.getStrand(StrandLanes::Sampler), doCreateSampler(descriptor),
       boost::asio::use_awaitable);
 }
 
@@ -1003,10 +1003,10 @@ auto VulkanRenderingDevice::destroySampler(SamplerHandle sampler_handle)
       boost::asio::use_awaitable);
 }
 
-auto VulkanRenderingDevice::createShader(ShaderDescription description)
+auto VulkanRenderingDevice::createShader(ShaderDescriptor descriptor)
     -> boost::asio::awaitable<std::expected<ShaderHandle, std::error_code>> {
   co_return co_await co_spawn(
-      strands_.getStrand(StrandLanes::Shader), doCreateShader(description),
+      strands_.getStrand(StrandLanes::Shader), doCreateShader(descriptor),
       boost::asio::use_awaitable);
 }
 
@@ -1017,10 +1017,10 @@ auto VulkanRenderingDevice::destroyShader(ShaderHandle shader_handle)
       boost::asio::use_awaitable);
 }
 
-auto VulkanRenderingDevice::ShaderHash::operator()(const ShaderDescription& description) const
+auto VulkanRenderingDevice::ShaderHash::operator()(const ShaderDescriptor& descriptor) const
     -> HashType {
-  HashType hash = std::hash<int>{}(static_cast<int>(description.stage_));
-  hashCombine(hash, description.hash_);
+  HashType hash = std::hash<int>{}(static_cast<int>(descriptor.stage_));
+  hashCombine(hash, descriptor.hash_);
   return hash;
 }
 
@@ -1123,18 +1123,18 @@ auto buildBufferCreateInfo(uint32_t size, BufferUsage usage, Visibility visibili
   return create_info;
 }
 
-auto VulkanRenderingDevice::doCreateBuffer(BufferDescription description)
+auto VulkanRenderingDevice::doCreateBuffer(BufferDescriptor descriptor)
     -> boost::asio::awaitable<std::expected<BufferHandle, std::error_code>> {
   LOG_DEBUG(
       "created buffer; size: {}, usage: {}, visibility: {}, buffer_allocator_size: {}",
-      description.size_, magic_enum::enum_name(description.usage_),
-      magic_enum::enum_name(description.visibility_), buffers_.size());
+      descriptor.size_, magic_enum::enum_name(descriptor.usage_),
+      magic_enum::enum_name(descriptor.visibility_), buffers_.size());
 
   auto build_buffer_create_info{ buildBufferCreateInfo(
-      description.size_, description.usage_, description.visibility_) };
+      descriptor.size_, descriptor.usage_, descriptor.visibility_) };
 
   Buffer buffer{
-    .size_ = description.size_,
+    .size_ = descriptor.size_,
   };
 
   auto buffer_create_status{ vmaCreateBuffer(
@@ -1145,8 +1145,8 @@ auto VulkanRenderingDevice::doCreateBuffer(BufferDescription description)
   if (buffer_create_status != VkResult::VK_SUCCESS) [[unlikely]] {
     LOG_DEBUG(
         "created buffer failed; size: {}, usage: {}, visibility: {}, buffer_allocator_size: {}",
-        description.size_, magic_enum::enum_name(description.usage_),
-        magic_enum::enum_name(description.visibility_), buffers_.size());
+        descriptor.size_, magic_enum::enum_name(descriptor.usage_),
+        magic_enum::enum_name(descriptor.visibility_), buffers_.size());
     co_return std::unexpected(Error::InternalError);
   }
 
@@ -1164,8 +1164,8 @@ auto VulkanRenderingDevice::doCreateBuffer(BufferDescription description)
   LOG_DEBUG(
       "created buffer success; size: {}, usage: {}, visibility: {}, index: {}, generation: {}, "
       "buffer_allocator_size: {}",
-      description.size_, magic_enum::enum_name(description.usage_),
-      magic_enum::enum_name(description.visibility_), buffers_[slot_index].index_,
+      descriptor.size_, magic_enum::enum_name(descriptor.usage_),
+      magic_enum::enum_name(descriptor.visibility_), buffers_[slot_index].index_,
       buffers_[slot_index].generation_, buffers_.size());
 
   co_return BufferHandle{ .index_ = buffers_[slot_index].index_,
@@ -1195,7 +1195,7 @@ auto VulkanRenderingDevice::doDestroyBuffer(BufferHandle buffer_handle)
   co_return Error::OK;
 }
 
-auto VulkanRenderingDevice::doCreateImage(ImageDescription description)
+auto VulkanRenderingDevice::doCreateImage(ImageDescriptor descriptor)
     -> boost::asio::awaitable<std::expected<ImageHandle, std::error_code>> {
   ImageSlot* image_slot{ nullptr };
 
@@ -1215,20 +1215,20 @@ auto VulkanRenderingDevice::doCreateImage(ImageDescription description)
   image_create_info = {};
   image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   image_create_info.imageType = VK_IMAGE_TYPE_2D;
-  image_create_info.format = toVulkan(description.format_);
-  image_create_info.extent = { .width = description.extent_.width_,
-                               .height = description.extent_.height_,
+  image_create_info.format = toVulkan(descriptor.format_);
+  image_create_info.extent = { .width = descriptor.extent_.width_,
+                               .height = descriptor.extent_.height_,
                                .depth = 1 };
-  image_create_info.mipLevels = description.mip_level_;
-  image_create_info.arrayLayers = description.layers_;
-  image_create_info.samples = toVulkan(description.samples_);
-  image_create_info.tiling = description.visibility_ == Visibility::Host ? VK_IMAGE_TILING_LINEAR
-                                                                         : VK_IMAGE_TILING_OPTIMAL;
-  image_create_info.usage = toVulkan(description.usage_);
+  image_create_info.mipLevels = descriptor.mip_level_;
+  image_create_info.arrayLayers = descriptor.layers_;
+  image_create_info.samples = toVulkan(descriptor.samples_);
+  image_create_info.tiling =
+      descriptor.visibility_ == Visibility::Host ? VK_IMAGE_TILING_LINEAR : VK_IMAGE_TILING_OPTIMAL;
+  image_create_info.usage = toVulkan(descriptor.usage_);
   image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   image_create_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-  if (description.type_ == ImageType::Cube) {
+  if (descriptor.type_ == ImageType::Cube) {
     image_create_info.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
   }
 
@@ -1251,15 +1251,15 @@ auto VulkanRenderingDevice::doCreateImage(ImageDescription description)
   image_view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
   image_view_create_info.image = image.image_;
   image_view_create_info.viewType =
-      description.type_ == ImageType::Cube ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D;
+      descriptor.type_ == ImageType::Cube ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D;
   image_view_create_info.format = image_create_info.format;
   image_view_create_info.subresourceRange.baseMipLevel = 0;
   image_view_create_info.subresourceRange.levelCount = image_create_info.mipLevels;
   image_view_create_info.subresourceRange.baseArrayLayer = 0;
   image_view_create_info.subresourceRange.layerCount = image_create_info.arrayLayers;
   image_view_create_info.subresourceRange.aspectMask =
-      hasFlag(description.usage_, ImageUsage::DepthStencilAttachment) ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                                                      : VK_IMAGE_ASPECT_COLOR_BIT;
+      hasFlag(descriptor.usage_, ImageUsage::DepthStencilAttachment) ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                                                     : VK_IMAGE_ASPECT_COLOR_BIT;
 
   auto image_view_expect{ device_->createImageView(image_view_create_info) };
   if (!image_view_expect) {
@@ -1289,10 +1289,10 @@ auto VulkanRenderingDevice::doDestroyImage(ImageHandle image_handle)
   co_return Error::OK;
 }
 
-auto VulkanRenderingDevice::doCreateSampler(SamplerDescription description)
+auto VulkanRenderingDevice::doCreateSampler(SamplerDescriptor descriptor)
     -> boost::asio::awaitable<std::expected<SamplerHandle, std::error_code>> {
 
-  if (description.anisotropy_enabled_) {
+  if (descriptor.anisotropy_enabled_) {
     if (device_features_.core_features_.samplerAnisotropy == VK_FALSE) {
       co_return std::unexpected(Error::FeatureNotSupported);
     }
@@ -1300,20 +1300,20 @@ auto VulkanRenderingDevice::doCreateSampler(SamplerDescription description)
 
   vk::SamplerCreateInfo sampler_create_info{
     vk::SamplerCreateFlags(),
-    static_cast<vk::Filter>(toVulkan(description.magnification_filter_)),
-    static_cast<vk::Filter>(toVulkan(description.minification_filter_)),
-    static_cast<vk::SamplerMipmapMode>(toVulkan(description.mipmap_mode_)),
-    static_cast<vk::SamplerAddressMode>(toVulkan(description.address_mode_u_)),
-    static_cast<vk::SamplerAddressMode>(toVulkan(description.address_mode_v_)),
-    static_cast<vk::SamplerAddressMode>(toVulkan(description.address_mode_w_)),
-    description.mip_lod_bias_,
-    description.anisotropy_enabled_ ? VK_TRUE : VK_FALSE,
-    std::min(description.max_anisotropy_, device_limits_.maxSamplerAnisotropy),
-    description.compare_enabled_ ? VK_TRUE : VK_FALSE,
-    static_cast<vk::CompareOp>(toVulkan(description.comparison_operation_)),
-    description.min_lod_,
-    description.max_lod_,
-    static_cast<vk::BorderColor>(toVulkan(description.border_color_)),
+    static_cast<vk::Filter>(toVulkan(descriptor.magnification_filter_)),
+    static_cast<vk::Filter>(toVulkan(descriptor.minification_filter_)),
+    static_cast<vk::SamplerMipmapMode>(toVulkan(descriptor.mipmap_mode_)),
+    static_cast<vk::SamplerAddressMode>(toVulkan(descriptor.address_mode_u_)),
+    static_cast<vk::SamplerAddressMode>(toVulkan(descriptor.address_mode_v_)),
+    static_cast<vk::SamplerAddressMode>(toVulkan(descriptor.address_mode_w_)),
+    descriptor.mip_lod_bias_,
+    descriptor.anisotropy_enabled_ ? VK_TRUE : VK_FALSE,
+    std::min(descriptor.max_anisotropy_, device_limits_.maxSamplerAnisotropy),
+    descriptor.compare_enabled_ ? VK_TRUE : VK_FALSE,
+    static_cast<vk::CompareOp>(toVulkan(descriptor.comparison_operation_)),
+    descriptor.min_lod_,
+    descriptor.max_lod_,
+    static_cast<vk::BorderColor>(toVulkan(descriptor.border_color_)),
     VK_FALSE
   };
 
@@ -1339,13 +1339,13 @@ auto VulkanRenderingDevice::doDestroySampler(SamplerHandle image_handle)
   co_return Error::OK;
 }
 
-auto VulkanRenderingDevice::doCreateShader(ShaderDescription description)
+auto VulkanRenderingDevice::doCreateShader(ShaderDescriptor descriptor)
     -> boost::asio::awaitable<std::expected<ShaderHandle, std::error_code>> {
 
   constexpr std::chrono::microseconds WaitDuration{ 50 };
   auto executor = co_await boost::asio::this_coro::executor;
 
-  if (auto iterator = shader_module_cache_.find(description);
+  if (auto iterator = shader_module_cache_.find(descriptor);
       iterator != shader_module_cache_.end()) {
     assert(iterator->second.generation_ == shader_modules_[iterator->second.index_].generation_);
     shader_modules_[iterator->second.index_].reference_counter_++;
@@ -1376,7 +1376,7 @@ auto VulkanRenderingDevice::doCreateShader(ShaderDescription description)
   auto guard = gsl::finally([&] {
     if (shader_modules_[slot_index].loading_) {
       LOG_DEBUG("creating shader aborted");
-      shader_module_cache_.erase(description);
+      shader_module_cache_.erase(descriptor);
       shader_module_free_list_.push_back(slot_index);
     }
   });
@@ -1384,26 +1384,26 @@ auto VulkanRenderingDevice::doCreateShader(ShaderDescription description)
   shader_modules_[slot_index].loading_ = true;
 
   auto [iter, inserted] = shader_module_cache_.emplace(
-      description, ShaderHandle{ .index_ = shader_modules_[slot_index].index_,
-                                 .generation_ = shader_modules_[slot_index].generation_ });
+      descriptor, ShaderHandle{ .index_ = shader_modules_[slot_index].index_,
+                                .generation_ = shader_modules_[slot_index].generation_ });
 
   LOG_DEBUG(
       "create shader; shader_type: {}, shader_module_allocator_size: {}",
-      magic_enum::enum_name(description.stage_), shader_modules_.size());
+      magic_enum::enum_name(descriptor.stage_), shader_modules_.size());
 
-  vk::ShaderModuleCreateInfo createInfo{ vk::ShaderModuleCreateFlags(), description.spirv_ };
+  vk::ShaderModuleCreateInfo createInfo{ vk::ShaderModuleCreateFlags(), descriptor.spirv_ };
 
   auto shader_module_expect{ device_->createShaderModule(createInfo) };
   if (!shader_module_expect) {
     LOG_ERROR(
         "created shader failed;  shader_type: {}, shader_module_allocator_size: "
         "{}",
-        magic_enum::enum_name(description.stage_), shader_modules_.size());
+        magic_enum::enum_name(descriptor.stage_), shader_modules_.size());
     co_return std::unexpected(Error::InternalError);
   }
 
   shader_modules_[slot_index].shader_ =
-      std::make_unique<ShaderResource>(std::move(*shader_module_expect), description.stage_);
+      std::make_unique<ShaderResource>(std::move(*shader_module_expect), descriptor.stage_);
   shader_modules_[slot_index].reference_counter_++;
   shader_modules_[slot_index].loaded_ = true;
   shader_modules_[slot_index].loading_ = false;
@@ -1468,7 +1468,7 @@ auto VulkanRenderingDevice::initializeVulkanInstance() -> boost::asio::awaitable
   for (const auto& available_layer : enumerate_layer_properties.value) {
     available_instance_layer_names.insert(available_layer.layerName);
     // TODO(jerbdroid): clang-cl does not build same spdlog as msvc check defines
-    // LOG_INFO(available_layer.description);
+    // LOG_INFO(available_layer.descriptor);
   }
 
   for (const auto& required_layer : required_layers) {

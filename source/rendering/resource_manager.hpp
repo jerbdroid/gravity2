@@ -13,12 +13,12 @@ struct ShaderResource {
   HashType hash_;
 };
 
-struct ShaderResourceDescription {
+struct ShaderResourceDescriptor {
   std::string path;
 };
 
 struct ShaderResourceSlot {
-  ShaderResourceDescription key_;
+  ShaderResourceDescriptor key_;
   std::unique_ptr<ShaderResource> shader_resource_;
 
   size_t index_ = 0;
@@ -36,7 +36,7 @@ struct ShaderResourceHandle {
 };
 
 struct ShaderResourceHash {
-  auto operator()(const ShaderResourceDescription& key) const -> HashType {
+  auto operator()(const ShaderResourceDescriptor& key) const -> HashType {
     return std::hash<std::string>()(key.path);
   }
 };
@@ -48,7 +48,7 @@ class ResourceManager {
 
   ResourceManager(StrandGroup strands);
 
-  auto acquireShaderResource(const ShaderResourceDescription& shader_resource_description)
+  auto acquireShaderResource(const ShaderResourceDescriptor& shader_resource_description)
       -> boost::asio::awaitable<std::expected<ShaderResourceHandle, std::error_code>>;
   auto releaseShaderResource(ShaderResourceHandle shader_resource_handle)
       -> boost::asio::awaitable<void>;
@@ -60,11 +60,11 @@ class ResourceManager {
 
   // Shader Resource
   std::vector<ShaderResourceSlot> shader_resources_;
-  std::unordered_map<ShaderResourceDescription, ShaderResourceHandle, ShaderResourceHash>
+  std::unordered_map<ShaderResourceDescriptor, ShaderResourceHandle, ShaderResourceHash>
       shader_resource_cache_;
   std::vector<size_t> shaders_resource_free_list_;
 
-  auto doAcquireShaderResource(const ShaderResourceDescription& shader_key)
+  auto doAcquireShaderResource(const ShaderResourceDescriptor& shader_key)
       -> boost::asio::awaitable<std::expected<ShaderResourceHandle, std::error_code>>;
   auto doReleaseShaderResource(ShaderResourceHandle shader_resource_handle)
       -> boost::asio::awaitable<void>;

@@ -13,15 +13,15 @@
 namespace gravity {
 
 auto operator==(
-    const ShaderResourceDescription& description,
-    const ShaderResourceDescription& other_description) -> bool {
-  return description.path == other_description.path;
+    const ShaderResourceDescriptor& descriptor, const ShaderResourceDescriptor& other_description)
+    -> bool {
+  return descriptor.path == other_description.path;
 }
 
 ResourceManager::ResourceManager(StrandGroup strands) : strands_{ std::move(strands) } {}
 
 auto ResourceManager::acquireShaderResource(
-    const ShaderResourceDescription& shader_resource_description)
+    const ShaderResourceDescriptor& shader_resource_description)
     -> boost::asio::awaitable<std::expected<ShaderResourceHandle, std::error_code>> {
 
   co_return co_await boost::asio::co_spawn(
@@ -43,7 +43,7 @@ auto ResourceManager::getShader(ShaderResourceHandle shader_resource_handle) con
   return *shader_resources_[shader_resource_handle.index_].shader_resource_;
 }
 
-auto ResourceManager::doAcquireShaderResource(const ShaderResourceDescription& shader_key)
+auto ResourceManager::doAcquireShaderResource(const ShaderResourceDescriptor& shader_key)
     -> boost::asio::awaitable<std::expected<ShaderResourceHandle, std::error_code>> {
 
   constexpr std::chrono::microseconds WaitDuration{ 50 };

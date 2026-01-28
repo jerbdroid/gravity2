@@ -1,6 +1,6 @@
 #pragma once
 
-#include "source/rendering/common/rendering_api.hpp"
+#include "source/rendering/common/rendering_type.hpp"
 
 #include <system_error>
 #include <unordered_map>
@@ -21,7 +21,7 @@ class WindowContext {
 
   [[nodiscard]] virtual auto getResolution() const -> Resolution = 0;
   [[nodiscard]] virtual auto windowIsOpen() const -> bool = 0;
-//   [[nodiscard]] virtual auto windowClose() const -> std::error_code = 0;
+  // [[nodiscard]] virtual auto windowClose() const -> std::error_code = 0;
   virtual void pollEvents() const = 0;
 
   virtual auto getRenderingSurface(RenderingApi rendering_api, void* instance, void* surface)

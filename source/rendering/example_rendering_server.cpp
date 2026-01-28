@@ -48,6 +48,15 @@ auto main() -> int {
     vulkan_rendering_device,
   };
 
+  future = co_spawn(
+      scheduler.getStrand(Scheduler::StrandLanes::Main), rendering_server.initialize(),
+      boost::asio::use_future);
+  future.wait();
+  if (auto err = future.get(); err) {
+    LOG_ERROR("Failed to initialize rendering device: {}", err.value());
+    return err.value();
+  }
+
   co_spawn(
       scheduler.getStrand(Scheduler::StrandLanes::Main), rendering_server.draw(),
       boost::asio::detached);
