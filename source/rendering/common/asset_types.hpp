@@ -47,24 +47,51 @@ inline auto assetShaderStageFromString(std::string_view str)
   return std::unexpected(Error::SchemaError);
 }
 
+enum class SamplerType : uint8_t { LinearWrap, LinearClamp, NearestWrap, ShadowCompare };
+
+inline auto samplerTypeFromString(std::string_view str) -> std::expected<SamplerType, std::error_code> {
+  if (str == "linear_wrap") {
+    return SamplerType::LinearWrap;
+  }
+  if (str == "linear_clamp") {
+    return SamplerType::LinearClamp;
+  }
+  if (str == "nearest_wrap") {
+    return SamplerType::NearestWrap;
+  }
+  if (str == "shadow_compare") {
+    return SamplerType::ShadowCompare;
+  }
+
+  return std::unexpected(Error::SchemaError);
+}
+
 struct ShaderStageDescriptor {
-  std::string spirvPath;
-  std::string metaPath;
+  std::string spirv_path_;
+  std::string meta_path_;
 };
 
 struct ShaderDescriptor {
-  std::unordered_map<ShaderStage, ShaderStageDescriptor> stages;
+  std::unordered_map<ShaderStage, ShaderStageDescriptor> stages_;
 };
 
-struct MaterialDescriptor {};
+struct MaterialTextureDescriptor {
+  std::string name_;
+  AssetId texture_asset_;
+  SamplerType sampler_;
+};
+
+struct MaterialDescriptor {
+  std::vector<MaterialTextureDescriptor> textures_;
+};
 
 struct TextureDescriptor {
-  std::string imagePath;
+  std::string image_path_;
 };
 
 struct AssetDescriptor {
   AssetType type;
-  std::variant<ShaderDescriptor, MaterialDescriptor, TextureDescriptor> data;
+  std::variant<ShaderDescriptor, MaterialDescriptor, TextureDescriptor> data_;
 };
 
 }  // namespace gravity

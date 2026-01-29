@@ -35,8 +35,11 @@ class AssetManager {
       const boost::json::object& object, std::span<const RequiredParameters> parameters)
       -> std::error_code;
 
-  static auto parseShaderDescriptor(const boost::json::array& shader_stages)
+  static auto parseShaderDescriptor(const boost::json::object& asset)
       -> std::expected<ShaderDescriptor, std::error_code>;
+
+  static auto parseMaterialDescriptor(const boost::json::object& asset)
+      -> std::expected<MaterialDescriptor, std::error_code>;
 };
 
 }  // namespace gravity

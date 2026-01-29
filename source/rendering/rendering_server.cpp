@@ -39,12 +39,10 @@ auto RenderingServer::loadAsset(AssetId asset_id) -> boost::asio::awaitable<std:
   }
 
   switch (asset.value()->type) {
-    case AssetType::Unknown:
-      co_return Error::UnavailableError;
     case AssetType::Shader: {
       auto shader_resource_expect = co_await co_spawn(
           strands_.getStrand(StrandLanes::Main),
-          loadShader(std::get<ShaderDescriptor>(asset.value()->data)), boost::asio::use_awaitable);
+          loadShader(std::get<ShaderDescriptor>(asset.value()->data_)), boost::asio::use_awaitable);
 
       if (!shader_resource_expect) {
         LOG_ERROR("failed to load shader resource");
@@ -62,7 +60,7 @@ auto RenderingServer::loadAsset(AssetId asset_id) -> boost::asio::awaitable<std:
     case AssetType::Material: {
       auto material_resource_expect = co_await co_spawn(
           strands_.getStrand(StrandLanes::Main),
-          loadMaterial(std::get<MaterialDescriptor>(asset.value()->data)),
+          loadMaterial(std::get<MaterialDescriptor>(asset.value()->data_)),
           boost::asio::use_awaitable);
 
       if (!material_resource_expect) {
@@ -82,11 +80,11 @@ auto RenderingServer::loadShader(const ShaderDescriptor& shader_descriptor)
   ShaderResource shader_resource{};
 
   for (auto shader_stage : magic_enum::enum_values<ShaderStage>()) {
-    if (!shader_descriptor.stages.contains(shader_stage)) {
+    if (!shader_descriptor.stages_.contains(shader_stage)) {
       LOG_TRACE("stage assets not found skipping; stage: {}", magic_enum::enum_name(shader_stage));
       continue;
     }
-    const auto& stage_descriptor = shader_descriptor.stages.at(shader_stage);
+    const auto& stage_descriptor = shader_descriptor.stages_.at(shader_stage);
 
     auto shader_handle_expect = co_await loadShaderStage(shader_stage, stage_descriptor);
     if (!shader_handle_expect) {
@@ -119,7 +117,7 @@ auto RenderingServer::loadShaderStage(
     ShaderStage stage, const ShaderStageDescriptor& shader_stage_descriptor)
     -> boost::asio::awaitable<std::expected<ShaderModuleHandle, std::error_code>> {
 
-  ShaderSourceResourceDescriptor resource_descriptor{ .path = shader_stage_descriptor.spirvPath };
+  ShaderSourceResourceDescriptor resource_descriptor{ .path = shader_stage_descriptor.spirv_path_ };
 
   auto handle_expect = co_await resources_.acquireShaderSourceResource(resource_descriptor);
   if (!handle_expect) {
