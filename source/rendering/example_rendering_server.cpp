@@ -23,7 +23,7 @@ void throw_exception(const std::exception& e, const boost::source_location&) {
   std::abort();
 }
 
-void throw_exception(stdext::exception const& e) {
+void throw_exception(const std::exception& e) {
   std::cerr << "Boost exception: " << e.what() << "\n";
   std::abort();
 }
@@ -76,7 +76,7 @@ auto main() -> int {
       scheduler.getStrand(Scheduler::StrandLanes::Main), rendering_server.draw(),
       boost::asio::detached);
 
-  std::this_thread::sleep_for(5s);
+  std::this_thread::sleep_for(1000s);
 
   LOG_INFO("end");
 }

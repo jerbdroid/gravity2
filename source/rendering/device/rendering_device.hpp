@@ -89,7 +89,7 @@ struct SamplerHandle {
 };
 
 struct ShaderDescriptor {
-  ShaderStage stage_ = ShaderStage::Unknown;
+  ShaderStage stage_ = ShaderStage::Vertex;
   std::span<const uint32_t> spirv_;
   HashType hash_;
 };

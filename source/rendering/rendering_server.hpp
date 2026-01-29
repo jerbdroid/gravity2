@@ -6,6 +6,8 @@
 #include "source/rendering/device/rendering_device.hpp"
 #include "source/rendering/resource_manager.hpp"
 
+#include "magic_enum.hpp"
+
 #include <cstdint>
 
 namespace gravity {
@@ -13,6 +15,13 @@ namespace gravity {
 struct MaterialDescription {
   std::string vertex_shader_path_;
   std::string fragment_shader_path_;
+};
+
+constexpr size_t ShaderStageCount = magic_enum::enum_count<ShaderStage>();
+
+struct ShaderGpuResource {
+  std::array<ShaderHandle, ShaderStageCount> stages_;
+  std::bitset<ShaderStageCount> present_;
 };
 
 class RenderingServer {
@@ -39,8 +48,12 @@ class RenderingServer {
   AssetManager assets_;
   ResourceManager resources_;
 
-  auto loadShaderModule(ShaderAssetDescriptor shader_asset_descriptor)
-      -> boost::asio::awaitable<void>;
+  std::unordered_map<AssetId, ShaderGpuResource> shader_cache_;
+
+  auto loadShaderModules(const ShaderAssetDescriptor& shader_asset_descriptor)
+      -> boost::asio::awaitable<std::expected<ShaderGpuResource, std::error_code>>;
+  auto loadShaderStage(ShaderStage stage, const ShaderStageDescriptor& shader_stage_descriptor)
+      -> boost::asio::awaitable<std::expected<ShaderHandle, std::error_code>>;
 };
 
 }  // namespace gravity

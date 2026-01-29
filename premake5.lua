@@ -66,31 +66,10 @@ files
 	"source/**.hpp",
 	"source/**.cpp",
 	"source/**.h",
-	-- "modules/imgui/*.cpp",
-	-- "modules/imgui/*.h",
-	-- "modules/crypto-algorithms/*.hpp",
-	-- "modules/crypto-algorithms/*.cpp",
-	-- "modules/imgui/backends/imgui_impl_glfw.*",
-	-- "modules/spirv_reflect/spirv_reflect.h",
-	-- "modules/spirv_reflect/spirv_reflect.c",
-	-- "modules/glslang/glslang/**/*.cpp",
-	-- "modules/glslang/glslang/**/*.h",
-	-- "modules/glslang/SPIRV/**/*.cpp",
-	-- "modules/glslang/SPIRV/**/*.h",
-	-- "modules/glslang/SPIRV/*.cpp",
-	-- "modules/glslang/SPIRV/*.h",
-	-- "generated/**"
-
 }
 
 
 removefiles {
-	-- "source/rendering/composition/**",
-	-- "modules/glslang/glslang/HLSL/*.cpp",
-	-- "modules/glslang/glslang/HLSL/*.h",
-	-- "modules/glslang/glslang/OSDependent/**/*.cpp",
-	-- "modules/glslang/glslang/OSDependent/**/*.h",
-	-- "modules/crypto-algorithms/*test.c"
 }
 
 
@@ -109,26 +88,6 @@ defines
 includedirs
 {
 	"./",
-	-- "%{IncludeDirectory.boost_asio}",  
-	-- "%{IncludeDirectory.boost_align}",
-	-- "%{IncludeDirectory.boost_config}",  
-	-- "%{IncludeDirectory.boost_core}",  
-	-- "%{IncludeDirectory.boost_assert}",  
-	-- "%{IncludeDirectory.boost_throw_exception}",  
-	-- "%{IncludeDirectory.boost_system}",  
-	-- "%{IncludeDirectory.boost_static_assert}",  
-	-- "%{IncludeDirectory.boost_context}",  
-	-- "%{IncludeDirectory.boost_date_time}",  
-	-- "%{IncludeDirectory.boost_json}",
-	-- "%{IncludeDirectory.boost_container}",
-	-- "%{IncludeDirectory.boost_intrusive}",
-	-- "%{IncludeDirectory.boost_move}",
-	-- "%{IncludeDirectory.boost_container_hash}",
-	-- "%{IncludeDirectory.boost_describe}",
-	-- "%{IncludeDirectory.boost_mp11}",
-	-- "%{IncludeDirectory.boost_endian}",
-	-- "%{IncludeDirectory.boost_winapi}",
-	-- "%{IncludeDirectory.boost_predef}", 
 	"%{IncludeDirectory.gsl}",
 	"%{IncludeDirectory.entt}",
 	"%{IncludeDirectory.spdlog}",
@@ -145,6 +104,11 @@ links
 	"%{Library.vulkan}",
 }
 
+vpaths {
+    ["Source"] = "**.cpp",
+    ["Headers"] = "**.h"
+}
+ 
 filter "system:windows"
 systemversion "latest"
 

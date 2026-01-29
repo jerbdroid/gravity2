@@ -116,7 +116,7 @@ auto AssetManager::getAsset(AssetId asset_id) const
     -> std::expected<const AssetDescriptor*, std::error_code> {
 
   if (!assets_.contains(asset_id)) {
-    return std::unexpected(Error::AssetNotFound);
+    return std::unexpected(Error::NotFoundError);
   }
   return &assets_.at(asset_id);
 }

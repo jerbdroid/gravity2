@@ -84,7 +84,6 @@ enum class CompareOperation : uint8_t {
 enum class BorderColor : uint8_t { FloatOpaqueBlack };
 
 enum class ShaderStage : uint8_t {
-  Unknown = 0,
   Vertex = (1U << 0U),
   Fragment = (1U << 1U),
   Compute = (1U << 2U),
