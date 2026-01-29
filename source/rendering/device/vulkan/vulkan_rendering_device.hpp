@@ -52,9 +52,9 @@ class VulkanRenderingDevice : public RenderingDevice {
   auto destroySampler(SamplerHandle sampler_handle)
       -> boost::asio::awaitable<std::error_code> override;
 
-  auto createShader(ShaderDescriptor descriptor)
-      -> boost::asio::awaitable<std::expected<ShaderHandle, std::error_code>> override;
-  auto destroyShader(ShaderHandle shader_handle)
+  auto createShaderModule(ShaderModuleDescriptor descriptor)
+      -> boost::asio::awaitable<std::expected<ShaderModuleHandle, std::error_code>> override;
+  auto destroyShaderModule(ShaderModuleHandle shader_handle)
       -> boost::asio::awaitable<std::error_code> override;
 
  private:
@@ -119,15 +119,15 @@ class VulkanRenderingDevice : public RenderingDevice {
     size_t index_ = 0;
   };
 
-  struct ShaderResource {
+  struct ShaderSourceResource {
     vk::raii::ShaderModule module_;
     ShaderStage stage_ = ShaderStage::Vertex;
   };
 
   struct ShaderSlot {
-    ShaderDescriptor description_;
+    ShaderModuleDescriptor description_;
 
-    std::unique_ptr<ShaderResource> shader_;
+    std::unique_ptr<ShaderSourceResource> shader_;
 
     uint32_t generation_ = 0;
     size_t index_ = 0;
@@ -138,7 +138,7 @@ class VulkanRenderingDevice : public RenderingDevice {
   };
 
   struct ShaderHash {
-    auto operator()(const ShaderDescriptor& descriptor) const -> HashType;
+    auto operator()(const ShaderModuleDescriptor& descriptor) const -> HashType;
   };
 
   WindowContext& window_context_;
@@ -211,7 +211,7 @@ class VulkanRenderingDevice : public RenderingDevice {
   std::vector<ShaderSlot> shader_modules_;
   std::vector<PendingDestroy> pending_destroy_shader_modules_;
   std::vector<size_t> shader_module_free_list_;
-  std::unordered_map<ShaderDescriptor, ShaderHandle, ShaderHash> shader_module_cache_;
+  std::unordered_map<ShaderModuleDescriptor, ShaderModuleHandle, ShaderHash> shader_module_cache_;
 
   std::unordered_set<std::string> enabled_instance_extension_names_;
   std::unordered_set<std::string> enabled_instance_layer_names_;
@@ -227,9 +227,9 @@ class VulkanRenderingDevice : public RenderingDevice {
   auto doCreateSampler(SamplerDescriptor descriptor)
       -> boost::asio::awaitable<std::expected<SamplerHandle, std::error_code>>;
   auto doDestroySampler(SamplerHandle image_handle) -> boost::asio::awaitable<std::error_code>;
-  auto doCreateShader(ShaderDescriptor descriptor)
-      -> boost::asio::awaitable<std::expected<ShaderHandle, std::error_code>>;
-  auto doDestroyShader(ShaderHandle shader_handle) -> boost::asio::awaitable<std::error_code>;
+  auto doCreateShader(ShaderModuleDescriptor descriptor)
+      -> boost::asio::awaitable<std::expected<ShaderModuleHandle, std::error_code>>;
+  auto doDestroyShader(ShaderModuleHandle shader_handle) -> boost::asio::awaitable<std::error_code>;
 
   auto initializeVulkanInstance() -> boost::asio::awaitable<std::error_code>;
   auto initializeSurface() -> boost::asio::awaitable<std::error_code>;

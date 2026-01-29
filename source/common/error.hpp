@@ -15,6 +15,7 @@ enum class Error : std::uint8_t {
   AbortedError,
   FailedPreconditionError,
   FeatureNotSupported,
+  SchemaError,
 };
 
 auto ErrorCategory() -> const std::error_category&;

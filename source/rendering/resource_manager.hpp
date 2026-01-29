@@ -8,18 +8,18 @@
 
 namespace gravity {
 
-struct ShaderResource {
+struct ShaderSourceResource {
   std::vector<uint32_t> spirv_;
   HashType hash_;
 };
 
-struct ShaderResourceDescriptor {
+struct ShaderSourceResourceDescriptor {
   std::string path;
 };
 
-struct ShaderResourceSlot {
-  ShaderResourceDescriptor key_;
-  std::unique_ptr<ShaderResource> shader_resource_;
+struct ShaderSourceResourceSlot {
+  ShaderSourceResourceDescriptor key_;
+  std::unique_ptr<ShaderSourceResource> shader_resource_;
 
   size_t index_ = 0;
   size_t generation_ = 0;
@@ -30,13 +30,13 @@ struct ShaderResourceSlot {
   bool loaded_ = false;
 };
 
-struct ShaderResourceHandle {
+struct ShaderSourceResourceHandle {
   size_t index_;
   size_t generation_;
 };
 
 struct ShaderResourceHash {
-  auto operator()(const ShaderResourceDescriptor& key) const -> HashType {
+  auto operator()(const ShaderSourceResourceDescriptor& key) const -> HashType {
     return std::hash<std::string>()(key.path);
   }
 };
@@ -48,25 +48,26 @@ class ResourceManager {
 
   ResourceManager(StrandGroup strands);
 
-  auto acquireShaderResource(const ShaderResourceDescriptor& shader_resource_description)
-      -> boost::asio::awaitable<std::expected<ShaderResourceHandle, std::error_code>>;
-  auto releaseShaderResource(ShaderResourceHandle shader_resource_handle)
+  auto acquireShaderSourceResource(
+      const ShaderSourceResourceDescriptor& shader_resource_description)
+      -> boost::asio::awaitable<std::expected<ShaderSourceResourceHandle, std::error_code>>;
+  auto releaseShaderSourceResource(ShaderSourceResourceHandle shader_resource_handle)
       -> boost::asio::awaitable<void>;
-  [[nodiscard]] auto getShader(ShaderResourceHandle shader_resource_handle) const
-      -> const ShaderResource&;
+  [[nodiscard]] auto getShader(ShaderSourceResourceHandle shader_resource_handle) const
+      -> const ShaderSourceResource&;
 
  private:
   StrandGroup strands_;
 
   // Shader Resource
-  std::vector<ShaderResourceSlot> shader_resources_;
-  std::unordered_map<ShaderResourceDescriptor, ShaderResourceHandle, ShaderResourceHash>
-      shader_resource_cache_;
-  std::vector<size_t> shaders_resource_free_list_;
+  std::vector<ShaderSourceResourceSlot> shader_source_resources_;
+  std::unordered_map<ShaderSourceResourceDescriptor, ShaderSourceResourceHandle, ShaderResourceHash>
+      shader_source_resource_cache_;
+  std::vector<size_t> shaders_source_resource_free_list_;
 
-  auto doAcquireShaderResource(const ShaderResourceDescriptor& shader_key)
-      -> boost::asio::awaitable<std::expected<ShaderResourceHandle, std::error_code>>;
-  auto doReleaseShaderResource(ShaderResourceHandle shader_resource_handle)
+  auto doAcquireShaderSourceResource(const ShaderSourceResourceDescriptor& shader_key)
+      -> boost::asio::awaitable<std::expected<ShaderSourceResourceHandle, std::error_code>>;
+  auto doReleaseShaderSourceResource(ShaderSourceResourceHandle shader_resource_handle)
       -> boost::asio::awaitable<void>;
 };
 

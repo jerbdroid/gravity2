@@ -801,7 +801,7 @@ namespace gravity {
 using boost::asio::co_spawn;
 using boost::asio::use_awaitable;
 
-auto operator==(const ShaderDescriptor& descriptor, const ShaderDescriptor& other_description)
+auto operator==(const ShaderModuleDescriptor& descriptor, const ShaderModuleDescriptor& other_description)
     -> bool {
   return descriptor.hash_ == other_description.hash_ &&
          descriptor.stage_ == other_description.stage_;
@@ -1004,21 +1004,21 @@ auto VulkanRenderingDevice::destroySampler(SamplerHandle sampler_handle)
       boost::asio::use_awaitable);
 }
 
-auto VulkanRenderingDevice::createShader(ShaderDescriptor descriptor)
-    -> boost::asio::awaitable<std::expected<ShaderHandle, std::error_code>> {
+auto VulkanRenderingDevice::createShaderModule(ShaderModuleDescriptor descriptor)
+    -> boost::asio::awaitable<std::expected<ShaderModuleHandle, std::error_code>> {
   co_return co_await co_spawn(
       strands_.getStrand(StrandLanes::Shader), doCreateShader(descriptor),
       boost::asio::use_awaitable);
 }
 
-auto VulkanRenderingDevice::destroyShader(ShaderHandle shader_handle)
+auto VulkanRenderingDevice::destroyShaderModule(ShaderModuleHandle shader_handle)
     -> boost::asio::awaitable<std::error_code> {
   co_return co_await co_spawn(
       strands_.getStrand(StrandLanes::Shader), doDestroyShader(shader_handle),
       boost::asio::use_awaitable);
 }
 
-auto VulkanRenderingDevice::ShaderHash::operator()(const ShaderDescriptor& descriptor) const
+auto VulkanRenderingDevice::ShaderHash::operator()(const ShaderModuleDescriptor& descriptor) const
     -> HashType {
   HashType hash = std::hash<int>{}(static_cast<int>(descriptor.stage_));
   hashCombine(hash, descriptor.hash_);
@@ -1340,8 +1340,8 @@ auto VulkanRenderingDevice::doDestroySampler(SamplerHandle image_handle)
   co_return Error::OK;
 }
 
-auto VulkanRenderingDevice::doCreateShader(ShaderDescriptor descriptor)
-    -> boost::asio::awaitable<std::expected<ShaderHandle, std::error_code>> {
+auto VulkanRenderingDevice::doCreateShader(ShaderModuleDescriptor descriptor)
+    -> boost::asio::awaitable<std::expected<ShaderModuleHandle, std::error_code>> {
 
   constexpr std::chrono::microseconds WaitDuration{ 50 };
   auto executor = co_await boost::asio::this_coro::executor;
@@ -1385,7 +1385,7 @@ auto VulkanRenderingDevice::doCreateShader(ShaderDescriptor descriptor)
   shader_modules_[slot_index].loading_ = true;
 
   auto [iter, inserted] = shader_module_cache_.emplace(
-      descriptor, ShaderHandle{ .index_ = shader_modules_[slot_index].index_,
+      descriptor, ShaderModuleHandle{ .index_ = shader_modules_[slot_index].index_,
                                 .generation_ = shader_modules_[slot_index].generation_ });
 
   LOG_DEBUG(
@@ -1404,7 +1404,7 @@ auto VulkanRenderingDevice::doCreateShader(ShaderDescriptor descriptor)
   }
 
   shader_modules_[slot_index].shader_ =
-      std::make_unique<ShaderResource>(std::move(*shader_module_expect), descriptor.stage_);
+      std::make_unique<ShaderSourceResource>(std::move(*shader_module_expect), descriptor.stage_);
   shader_modules_[slot_index].reference_counter_++;
   shader_modules_[slot_index].loaded_ = true;
   shader_modules_[slot_index].loading_ = false;
@@ -1416,11 +1416,11 @@ auto VulkanRenderingDevice::doCreateShader(ShaderDescriptor descriptor)
       shader_modules_[slot_index].index_, shader_modules_[slot_index].generation_,
       shader_modules_.size());
 
-  co_return ShaderHandle{ .index_ = shader_modules_[slot_index].index_,
+  co_return ShaderModuleHandle{ .index_ = shader_modules_[slot_index].index_,
                           .generation_ = shader_modules_[slot_index].generation_ };
 }
 
-auto VulkanRenderingDevice::doDestroyShader(ShaderHandle shader_handle)
+auto VulkanRenderingDevice::doDestroyShader(ShaderModuleHandle shader_handle)
     -> boost::asio::awaitable<std::error_code> {
   LOG_DEBUG(
       "destroy shader; index: {}, handler generation: {}, storage_generation: {}, "

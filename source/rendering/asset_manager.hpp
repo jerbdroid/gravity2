@@ -1,14 +1,25 @@
 #pragma once
 
+#include "boost/json/object.hpp"
+#include "common/asset_types.hpp"
 #include "source/rendering/common/asset_types.hpp"
 
 #include "boost/asio/awaitable.hpp"
 
+#include <cstdint>
 #include <expected>
+#include <span>
 #include <system_error>
 #include <unordered_map>
 
 namespace gravity {
+
+enum class ExpectedTypes : uint8_t { String, Integer, List };
+
+struct RequiredParameters {
+  const char* name_;
+  ExpectedTypes expected_type_;
+};
 
 class AssetManager {
  public:
@@ -19,6 +30,13 @@ class AssetManager {
 
  private:
   std::unordered_map<AssetId, AssetDescriptor> assets_;
+
+  static auto validateRequiredParameters(
+      const boost::json::object& object, std::span<const RequiredParameters> parameters)
+      -> std::error_code;
+
+  static auto parseShaderDescriptor(const boost::json::array& shader_stages)
+      -> std::expected<ShaderDescriptor, std::error_code>;
 };
 
 }  // namespace gravity

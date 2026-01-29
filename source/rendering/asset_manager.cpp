@@ -1,5 +1,6 @@
 #include "asset_manager.hpp"
 
+#include "boost/json/array.hpp"
 #include "common/asset_types.hpp"
 #include "source/common/error.hpp"
 #include "source/common/logging/logger.hpp"
@@ -13,6 +14,30 @@
 namespace json = boost::json;
 
 namespace gravity {
+
+static constexpr const char* AssetTypeParameter{ "type" };
+static constexpr const char* AssetIdParameter{ "id" };
+
+static constexpr const char* ShaderStageParameter{ "stages" };
+
+static constexpr const char* ShaderStageSpirvParameter{ "spirv" };
+static constexpr const char* ShaderStageMetaParameter{ "meta" };
+static constexpr const char* ShaderStageTypeParameter{ "type" };
+
+static constexpr std::array<RequiredParameters, 1> ShaderRequiredParameters{
+  { { .name_ = ShaderStageParameter, .expected_type_ = ExpectedTypes::List } }
+};
+
+static constexpr std::array<RequiredParameters, 3> ShaderStageRequiredParameters{
+  { { .name_ = ShaderStageSpirvParameter, .expected_type_ = ExpectedTypes::String },
+    { .name_ = ShaderStageMetaParameter, .expected_type_ = ExpectedTypes::String },
+    { .name_ = ShaderStageTypeParameter, .expected_type_ = ExpectedTypes::String } }
+};
+
+static constexpr std::array<RequiredParameters, 2> AssetRequiredParameters{
+  { { .name_ = AssetIdParameter, .expected_type_ = ExpectedTypes::Integer },
+    { .name_ = AssetTypeParameter, .expected_type_ = ExpectedTypes::String } }
+};
 
 auto AssetManager::initialize() -> boost::asio::awaitable<std::error_code> {
   LOG_TRACE("initializing asset manager");
@@ -46,65 +71,40 @@ auto AssetManager::initialize() -> boost::asio::awaitable<std::error_code> {
     if (item.is_object()) {
       const auto& asset = item.as_object();
 
-      if (!asset.contains("id")) {
-        LOG_ERROR("asset database is not valid; missing id field");
-        co_return Error::InternalError;
+      if (auto error{ validateRequiredParameters(asset, AssetRequiredParameters) };
+          error != Error::OK) {
+        co_return error;
       }
 
-      auto [iterator, inserted] = assets_.emplace(asset.at("id").as_int64(), AssetDescriptor{});
+      auto asset_id{ asset.at(AssetIdParameter).as_int64() };
 
-      if (!asset.contains("type")) {
-        LOG_ERROR("asset database is not valid; missing type field");
-        co_return Error::InternalError;
+      auto asset_type{ assetTypeFromString(asset.at(AssetTypeParameter).as_string()) };
+      if (!asset_type) {
+        LOG_ERROR("invalid asset type");
+        co_return asset_type.error();
       }
 
-      iterator->second.type = assetTypeFromString(asset.at("type").as_string());
+      auto [iterator, inserted] =
+          assets_.emplace(asset_id, AssetDescriptor{ .type = asset_type.value() });
+
+      if (!inserted) {
+        LOG_ERROR("duplicate asset id {}", asset_id);
+        co_return Error::SchemaError;
+      }
 
       if (iterator->second.type == AssetType::Shader) {
-        if (!asset.contains("stages")) {
-          LOG_ERROR("asset database is not valid; missing stages field");
-          co_return Error::InternalError;
+        if (auto error{ validateRequiredParameters(asset, ShaderRequiredParameters) };
+            error != Error::OK) {
+          co_return error;
+        }
+        auto shader_descriptor_expect{ parseShaderDescriptor(
+            asset.at(ShaderStageParameter).as_array()) };
+        if (!shader_descriptor_expect) {
+          LOG_ERROR("asset database ");
+          co_return shader_descriptor_expect.error();
         }
 
-        ShaderAssetDescriptor shader_asset_descriptor{};
-
-        const auto& stages = asset.at("stages").as_object();
-
-        if (stages.contains("vertex")) {
-          ShaderStageDescriptor shader_stage_descriptor{};
-
-          const auto& vertex = stages.at("vertex").as_object();
-
-          if (vertex.contains("spirv")) {
-            shader_stage_descriptor.spirvPath = std::string(vertex.at("spirv").as_string());
-          }
-
-          if (vertex.contains("meta")) {
-            shader_stage_descriptor.metaPath = std::string(vertex.at("meta").as_string());
-          }
-
-          shader_asset_descriptor.stages.emplace(
-              ShaderStage::Vertex, std::move(shader_stage_descriptor));
-        }
-
-        if (stages.contains("fragment")) {
-          ShaderStageDescriptor shader_stage_descriptor{};
-
-          const auto& fragment = stages.at("fragment").as_object();
-
-          if (fragment.contains("spirv")) {
-            shader_stage_descriptor.spirvPath = std::string(fragment.at("spirv").as_string());
-          }
-
-          if (fragment.contains("meta")) {
-            shader_stage_descriptor.metaPath = std::string(fragment.at("meta").as_string());
-          }
-
-          shader_asset_descriptor.stages.emplace(
-              ShaderStage::Fragment, std::move(shader_stage_descriptor));
-        }
-
-        iterator->second.data = std::move(shader_asset_descriptor);
+        iterator->second.data = std::move(shader_descriptor_expect.value());
       }
     }
   }
@@ -119,6 +119,63 @@ auto AssetManager::getAsset(AssetId asset_id) const
     return std::unexpected(Error::NotFoundError);
   }
   return &assets_.at(asset_id);
+}
+
+auto AssetManager::validateRequiredParameters(
+    const boost::json::object& object, std::span<const RequiredParameters> parameters)
+    -> std::error_code {
+  for (const auto& parameter : parameters) {
+    if (!object.contains(parameter.name_)) {
+      return Error::SchemaError;
+    }
+
+    switch (parameter.expected_type_) {
+      case ExpectedTypes::String:
+        if (!object.at(parameter.name_).is_string()) {
+          return Error::SchemaError;
+        }
+        break;
+      case ExpectedTypes::Integer:
+        if (!object.at(parameter.name_).is_int64()) {
+          return Error::SchemaError;
+        }
+        break;
+      case ExpectedTypes::List:
+        if (!object.at(parameter.name_).is_array()) {
+          return Error::SchemaError;
+        }
+        break;
+    }
+  }
+  return Error::OK;
+}
+
+auto AssetManager::parseShaderDescriptor(const boost::json::array& shader_stages)
+    -> std::expected<ShaderDescriptor, std::error_code> {
+  ShaderDescriptor shader_descriptor{};
+
+  for (const auto& shader_stage_object : shader_stages) {
+    if (!shader_stage_object.is_object()) {
+      return std::unexpected(Error::SchemaError);
+    }
+    const auto& shader_stage = shader_stage_object.as_object();
+    if (auto error{ validateRequiredParameters(shader_stage, ShaderStageRequiredParameters) };
+        error != Error::OK) {
+      return std::unexpected(error);
+    }
+
+    auto stage{ assetShaderStageFromString(shader_stage.at(ShaderStageTypeParameter).as_string()) };
+    if (!stage) {
+      return std::unexpected(stage.error());
+    }
+    shader_descriptor.stages.emplace(
+        stage.value(),
+        ShaderStageDescriptor{
+            .spirvPath = std::string(shader_stage.at(ShaderStageSpirvParameter).as_string()),
+            .metaPath = std::string(shader_stage.at(ShaderStageMetaParameter).as_string()) });
+  }
+
+  return shader_descriptor;
 }
 
 }  // namespace gravity

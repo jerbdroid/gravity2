@@ -88,13 +88,13 @@ struct SamplerHandle {
   size_t generation_;
 };
 
-struct ShaderDescriptor {
+struct ShaderModuleDescriptor {
   ShaderStage stage_ = ShaderStage::Vertex;
   std::span<const uint32_t> spirv_;
   HashType hash_;
 };
 
-struct ShaderHandle {
+struct ShaderModuleHandle {
   size_t index_ = 0;
   size_t generation_ = 0;
 };
@@ -120,9 +120,9 @@ class RenderingDevice {
   virtual auto destroySampler(SamplerHandle sampler_handler)
       -> boost::asio::awaitable<std::error_code> = 0;
 
-  virtual auto createShader(ShaderDescriptor descriptor)
-      -> boost::asio::awaitable<std::expected<ShaderHandle, std::error_code>> = 0;
-  virtual auto destroyShader(ShaderHandle shader_handle)
+  virtual auto createShaderModule(ShaderModuleDescriptor descriptor)
+      -> boost::asio::awaitable<std::expected<ShaderModuleHandle, std::error_code>> = 0;
+  virtual auto destroyShaderModule(ShaderModuleHandle shader_handle)
       -> boost::asio::awaitable<std::error_code> = 0;
 };
 

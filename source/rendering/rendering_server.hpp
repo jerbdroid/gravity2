@@ -9,20 +9,20 @@
 #include "magic_enum.hpp"
 
 #include <cstdint>
+#include <unordered_map>
 
 namespace gravity {
 
-struct MaterialDescription {
-  std::string vertex_shader_path_;
-  std::string fragment_shader_path_;
-};
-
 constexpr size_t ShaderStageCount = magic_enum::enum_count<ShaderStage>();
 
-struct ShaderGpuResource {
-  std::array<ShaderHandle, ShaderStageCount> stages_;
+struct ShaderResource {
+  std::array<ShaderModuleHandle, ShaderStageCount> stages_;
   std::bitset<ShaderStageCount> present_;
 };
+
+struct MaterialDescription {};
+
+struct MaterialResource {};
 
 class RenderingServer {
  public:
@@ -48,12 +48,16 @@ class RenderingServer {
   AssetManager assets_;
   ResourceManager resources_;
 
-  std::unordered_map<AssetId, ShaderGpuResource> shader_cache_;
+  std::unordered_map<AssetId, ShaderResource> shader_resource_cache_;
+  std::unordered_map<AssetId, MaterialResource> material_resource_cache_;
 
-  auto loadShaderModules(const ShaderAssetDescriptor& shader_asset_descriptor)
-      -> boost::asio::awaitable<std::expected<ShaderGpuResource, std::error_code>>;
+  auto loadShader(const ShaderDescriptor& shader_descriptor)
+      -> boost::asio::awaitable<std::expected<ShaderResource, std::error_code>>;
   auto loadShaderStage(ShaderStage stage, const ShaderStageDescriptor& shader_stage_descriptor)
-      -> boost::asio::awaitable<std::expected<ShaderHandle, std::error_code>>;
+      -> boost::asio::awaitable<std::expected<ShaderModuleHandle, std::error_code>>;
+
+  auto loadMaterial(const MaterialDescriptor& material_descriptor)
+      -> boost::asio::awaitable<std::expected<MaterialResource, std::error_code>>;
 };
 
 }  // namespace gravity
