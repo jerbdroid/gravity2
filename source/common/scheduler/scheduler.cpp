@@ -2,6 +2,7 @@
 
 #include "source/common/logging/logger.hpp"
 
+#undef GRAVITY_MODULE_NAME
 #define GRAVITY_MODULE_NAME "scheduler"
 
 namespace gravity {

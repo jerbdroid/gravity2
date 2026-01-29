@@ -14,6 +14,8 @@ MODULE.bazel.lock
 *.vcxproj.filters
 *.vcxproj.user
 *.sln
+*.slnx
+
 
 Makefile
 *.make
@@ -48,3 +50,5 @@ prebuilt
 *.big
 
 .env
+
+modules/

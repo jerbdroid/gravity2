@@ -2,7 +2,7 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 
 cc_library(
     name = "perfetto",
-    srcs = ["perfetto.cc"],
+    srcs = ["perfetto.cpp"],
     hdrs = ["perfetto.h"],
     defines = [
         "WIN32_LEAN_AND_MEAN",

@@ -13,8 +13,6 @@
 
 namespace gravity {
 
-auto readFileAsString(std::string_view filename) -> std::string;
-
 void setThreadName(std::thread& thread, const std::string& name);
 void setMainThreadName(const std::string& name);
 

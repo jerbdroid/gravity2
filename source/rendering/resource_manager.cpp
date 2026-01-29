@@ -8,6 +8,7 @@
 #include <cassert>
 #include <expected>
 
+#undef GRAVITY_MODULE_NAME
 #define GRAVITY_MODULE_NAME "resource_manager"
 
 namespace gravity {

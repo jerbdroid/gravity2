@@ -7,6 +7,7 @@
 
 #include "boost/asio/detached.hpp"
 
+#include <iostream>
 #include <thread>
 
 using namespace gravity;
@@ -14,6 +15,20 @@ using boost::asio::steady_timer;
 using boost::asio::use_awaitable;
 
 using namespace std::chrono_literals;
+
+namespace boost {
+
+void throw_exception(const std::exception& e, const boost::source_location&) {
+  std::cerr << "Boost exception: " << e.what() << "\n";
+  std::abort();
+}
+
+void throw_exception(stdext::exception const& e) {
+  std::cerr << "Boost exception: " << e.what() << "\n";
+  std::abort();
+}
+
+}  // namespace boost
 
 auto main() -> int {
 

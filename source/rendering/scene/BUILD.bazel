@@ -1,0 +1,14 @@
+load("//bazel:gravity_build_system.bzl", "gravity_cc_library")
+
+gravity_cc_library(
+    name = "scene_renderer",
+    srcs = ["scene_renderer.cpp"],
+    hdrs = ["scene_renderer.hpp"],
+    visibility = [
+        "//visibility:public",
+    ],
+    deps = [
+        "//source/common/scheduler",
+        "//source/rendering/server:rendering_server",
+    ],
+)

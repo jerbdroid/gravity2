@@ -39,7 +39,7 @@ class RenderingServer {
   AssetManager assets_;
   ResourceManager resources_;
 
-  auto loadShaderModule(const ShaderAssetDescriptor& shader_asset_descriptor)
+  auto loadShaderModule(ShaderAssetDescriptor shader_asset_descriptor)
       -> boost::asio::awaitable<void>;
 };
 

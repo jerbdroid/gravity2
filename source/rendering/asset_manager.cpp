@@ -7,20 +7,10 @@
 #include "boost/asio.hpp"
 #include "boost/json.hpp"
 
-#include <print>
-
+#undef GRAVITY_MODULE_NAME
 #define GRAVITY_MODULE_NAME "resource_manager"
 
 namespace json = boost::json;
-
-namespace boost {
-
-void throw_exception(const std::exception&, const boost::source_location&) {
-  std::print("Exceptions are not supported!");
-  std::abort();
-}
-
-}  // namespace boost
 
 namespace gravity {
 

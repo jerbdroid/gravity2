@@ -62,7 +62,7 @@ auto RenderingServer::loadAsset(AssetId asset_id) -> boost::asio::awaitable<std:
   }
 }
 
-auto RenderingServer::loadShaderModule(const ShaderAssetDescriptor& shader_asset_descriptor)
+auto RenderingServer::loadShaderModule(ShaderAssetDescriptor shader_asset_descriptor)
     -> boost::asio::awaitable<void> {
 
   if (shader_asset_descriptor.stages.contains(ShaderStage::Vertex)) {
@@ -72,14 +72,12 @@ auto RenderingServer::loadShaderModule(const ShaderAssetDescriptor& shader_asset
                                                               shader_stage_descriptor.spirvPath };
 
     auto vertHandle = co_await resources_.acquireShaderResource(shader_resource_description);
-    // auto  fragHandle = co_await resources_.loadShader(path);
     if (!vertHandle) {
       LOG_ERROR("failed to load shader resource");
       co_return;
     }
 
     const auto& vert = resources_.getShader(vertHandle.value());
-    // const auto& frag = resources_.getShader(fragHandle);
 
     ShaderDescriptor descriptor{
       .stage_ = ShaderStage::Vertex,
@@ -90,6 +88,34 @@ auto RenderingServer::loadShaderModule(const ShaderAssetDescriptor& shader_asset
     co_await device_.createShader(descriptor);
 
     co_await resources_.releaseShaderResource(vertHandle.value());
+  }
+
+  if (shader_asset_descriptor.stages.contains(ShaderStage::Fragment)) {
+    const auto& shader_stage_descriptor = shader_asset_descriptor.stages.at(ShaderStage::Fragment);
+
+    ShaderResourceDescriptor shader_resource_description{ .path =
+                                                              shader_stage_descriptor.spirvPath };
+
+    auto shader_resource_handle_expect =
+        co_await resources_.acquireShaderResource(shader_resource_description);
+    if (!shader_resource_handle_expect) {
+      LOG_ERROR("failed to load shader resource");
+      co_return;
+    }
+
+    auto shader_resource_handle = shader_resource_handle_expect.value();
+
+    const auto& shader_resource = resources_.getShader(shader_resource_handle);
+
+    ShaderDescriptor descriptor{
+      .stage_ = ShaderStage::Fragment,
+      .spirv_ = shader_resource.spirv_,
+      .hash_ = shader_resource.hash_,
+    };
+
+    co_await device_.createShader(descriptor);
+
+    co_await resources_.releaseShaderResource(shader_resource_handle);
   }
 
   // resources_.releaseShaderResource(fragHandle);
