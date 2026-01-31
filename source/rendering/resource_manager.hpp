@@ -2,24 +2,43 @@
 
 #include "source/common/scheduler/scheduler.hpp"
 
+#include "boost/asio.hpp"
+#include "magic_enum.hpp"
+
+#include <cstddef>
+#include <cstdint>
 #include <expected>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace gravity {
 
-struct ShaderSourceResource {
-  std::vector<uint32_t> spirv_;
+class ResourceManager;
+
+enum class ResourceType : uint8_t { Shader = 1, Image, Mesh, Material };
+
+struct ResourceDescriptor {
+  ResourceType type_;
+
+  std::string path_;
+};
+
+struct ResourceHandle {
+  ResourceType type_;
+
+  size_t index_;
+  size_t generation_;
+};
+
+struct Resource {
+  std::vector<uint8_t> data_;
   HashType hash_;
 };
 
-struct ShaderSourceResourceDescriptor {
-  std::string path;
-};
-
-struct ShaderSourceResourceSlot {
-  ShaderSourceResourceDescriptor key_;
-  std::unique_ptr<ShaderSourceResource> shader_resource_;
+struct ResourceSlot {
+  ResourceDescriptor descriptor_;
+  std::unique_ptr<Resource> resource_;
 
   size_t index_ = 0;
   size_t generation_ = 0;
@@ -30,45 +49,64 @@ struct ShaderSourceResourceSlot {
   bool loaded_ = false;
 };
 
-struct ShaderSourceResourceHandle {
-  size_t index_;
-  size_t generation_;
+struct ResourceLease {
+  ResourceManager* resource_manager_ = nullptr;
+  ResourceHandle handle_ = {};
+  ResourceLease(ResourceManager* resource_manager, ResourceHandle handle);
+
+  ResourceLease() = default;
+
+  ResourceLease(const ResourceLease& other) = delete;
+  auto operator=(const ResourceLease& other) -> ResourceLease& = delete;
+
+  ResourceLease(ResourceLease&& other) noexcept;
+  auto operator=(ResourceLease&& other) noexcept -> ResourceLease&;
+
+  ~ResourceLease();
+
+ private:
+  void release();
 };
 
-struct ShaderResourceHash {
-  auto operator()(const ShaderSourceResourceDescriptor& key) const -> HashType {
-    return std::hash<std::string>()(key.path);
+struct ResourceDescriptorHash {
+  auto operator()(const ResourceDescriptor& key) const -> HashType {
+    return std::hash<std::string>()(key.path_);
   }
 };
 
 class ResourceManager {
  public:
-  enum class StrandLanes : uint8_t { Shaders, _Count };
+  using StrandLanes = ResourceType;
   using StrandGroup = StrandGroup<ResourceManager>;
 
   ResourceManager(StrandGroup strands);
 
-  auto acquireShaderSourceResource(
-      const ShaderSourceResourceDescriptor& shader_resource_description)
-      -> boost::asio::awaitable<std::expected<ShaderSourceResourceHandle, std::error_code>>;
-  auto releaseShaderSourceResource(ShaderSourceResourceHandle shader_resource_handle)
-      -> boost::asio::awaitable<void>;
-  [[nodiscard]] auto getShader(ShaderSourceResourceHandle shader_resource_handle) const
-      -> const ShaderSourceResource&;
+  auto acquireResource(const ResourceDescriptor& resource_descriptor)
+      -> boost::asio::awaitable<std::expected<ResourceLease, std::error_code>>;
+
+  void releaseResource(ResourceHandle resource_handle);
+
+  [[nodiscard]] auto getResource(const ResourceLease& lease) const
+      -> boost::asio::awaitable<const Resource*>;
 
  private:
+  using ResourceList = std::vector<ResourceSlot>;
+  using ResourceCache =
+      std::unordered_map<ResourceDescriptor, ResourceHandle, ResourceDescriptorHash>;
+  using ResourceFreeList = std::vector<size_t>;
+
+  struct ResourceContext {
+    ResourceList resources_;
+    ResourceCache cache_;
+    ResourceFreeList free_list_;
+  };
+
   StrandGroup strands_;
 
-  // Shader Resource
-  std::vector<ShaderSourceResourceSlot> shader_source_resources_;
-  std::unordered_map<ShaderSourceResourceDescriptor, ShaderSourceResourceHandle, ShaderResourceHash>
-      shader_source_resource_cache_;
-  std::vector<size_t> shaders_source_resource_free_list_;
+  std::array<ResourceContext, magic_enum::enum_count<ResourceType>()> contexts_;
 
-  auto doAcquireShaderSourceResource(const ShaderSourceResourceDescriptor& shader_key)
-      -> boost::asio::awaitable<std::expected<ShaderSourceResourceHandle, std::error_code>>;
-  auto doReleaseShaderSourceResource(ShaderSourceResourceHandle shader_resource_handle)
-      -> boost::asio::awaitable<void>;
+  auto doAcquireResource(const ResourceDescriptor& descriptor)
+      -> boost::asio::awaitable<std::expected<ResourceLease, std::error_code>>;
 };
 
 }  // namespace gravity

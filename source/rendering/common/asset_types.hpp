@@ -11,6 +11,7 @@
 #include <system_error>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 
 namespace gravity {
 
@@ -49,7 +50,8 @@ inline auto assetShaderStageFromString(std::string_view str)
 
 enum class SamplerType : uint8_t { LinearWrap, LinearClamp, NearestWrap, ShadowCompare };
 
-inline auto samplerTypeFromString(std::string_view str) -> std::expected<SamplerType, std::error_code> {
+inline auto samplerTypeFromString(std::string_view str)
+    -> std::expected<SamplerType, std::error_code> {
   if (str == "linear_wrap") {
     return SamplerType::LinearWrap;
   }
@@ -85,13 +87,28 @@ struct MaterialDescriptor {
   std::vector<MaterialTextureDescriptor> textures_;
 };
 
+struct SubmeshDescriptor {
+  std::string name_;
+  int64_t first_index_;
+  int64_t index_count_;
+  AssetId material_asset_;
+};
+
+struct MeshDescriptor {
+  std::string source_;
+  std::vector<SubmeshDescriptor> submeshes_;
+};
+
 struct TextureDescriptor {
   std::string image_path_;
+  std::string color_space_;
+
+  bool mipmaps_;
 };
 
 struct AssetDescriptor {
   AssetType type;
-  std::variant<ShaderDescriptor, MaterialDescriptor, TextureDescriptor> data_;
+  std::variant<ShaderDescriptor, MaterialDescriptor, TextureDescriptor, MeshDescriptor> data_;
 };
 
 }  // namespace gravity

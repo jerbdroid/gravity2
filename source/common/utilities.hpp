@@ -59,4 +59,14 @@ inline auto hash(std::span<const uint32_t> data, HashType offset_basis = fnv_off
   return hash;
 }
 
+inline auto hash(std::span<const uint8_t> data, HashType offset_basis = fnv_offset_basis)
+    -> HashType {
+  HashType hash = offset_basis;
+  for (uint8_t byte : data) {
+    hash ^= static_cast<HashType>(byte);
+    hash *= fnv_prime;
+  }
+  return hash;
+}
+
 }  // namespace gravity

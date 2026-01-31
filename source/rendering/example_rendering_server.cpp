@@ -55,7 +55,7 @@ auto main() -> int {
       boost::asio::use_future);
   future.wait();
   if (auto err = future.get(); err) {
-    LOG_ERROR("Failed to initialize rendering device: {}", err.value());
+    LOG_ERROR("failed to initialize rendering device: {}", err.value());
     return err.value();
   }
   RenderingServer rendering_server{
@@ -68,7 +68,7 @@ auto main() -> int {
       boost::asio::use_future);
   future.wait();
   if (auto err = future.get(); err) {
-    LOG_ERROR("Failed to initialize rendering device: {}", err.value());
+    LOG_ERROR("failed to initialize rendering device: {}", err.value());
     return err.value();
   }
 
@@ -76,7 +76,7 @@ auto main() -> int {
       scheduler.getStrand(Scheduler::StrandLanes::Main), rendering_server.draw(),
       boost::asio::detached);
 
-  std::this_thread::sleep_for(1000s);
+  std::this_thread::sleep_for(15s);
 
   LOG_INFO("end");
 }

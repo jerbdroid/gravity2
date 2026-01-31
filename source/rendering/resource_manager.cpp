@@ -3,7 +3,7 @@
 #include "source/common/logging/logger.hpp"
 
 #include "boost/asio/use_awaitable.hpp"
-#include "gsl/gsl"
+#include "magic_enum.hpp"
 
 #include <cassert>
 #include <expected>
@@ -11,149 +11,226 @@
 #undef GRAVITY_MODULE_NAME
 #define GRAVITY_MODULE_NAME "resource_manager"
 
+namespace asio = boost::asio;
+
 namespace gravity {
 
-auto operator==(
-    const ShaderSourceResourceDescriptor& descriptor, const ShaderSourceResourceDescriptor& other_description)
+auto operator==(const ResourceDescriptor& descriptor, const ResourceDescriptor& other_description)
     -> bool {
-  return descriptor.path == other_description.path;
+  return descriptor.path_ == other_description.path_;
+}
+
+auto toIndex(ResourceType type) -> size_t {
+  switch (type) {
+    case ResourceType::Shader:
+      return 0;
+    case ResourceType::Image:
+      return 1;
+    case ResourceType::Mesh:
+      return 2;
+    case ResourceType::Material:
+      return 3;
+  }
+
+  std::unreachable();
+}
+
+ResourceLease::ResourceLease(ResourceManager* resource_manager, ResourceHandle handle)
+    : resource_manager_{ resource_manager }, handle_{ handle } {}
+
+ResourceLease::ResourceLease(ResourceLease&& other) noexcept {
+  std::swap(handle_, other.handle_);
+  std::swap(resource_manager_, other.resource_manager_);
+}
+
+auto ResourceLease::operator=(ResourceLease&& other) noexcept -> ResourceLease& {
+  if (this != &other) {
+    release();
+
+    std::swap(handle_, other.handle_);
+    std::swap(resource_manager_, other.resource_manager_);
+  }
+  return *this;
+}
+
+ResourceLease::~ResourceLease() {
+  release();
+}
+
+void ResourceLease::release() {
+  if (resource_manager_ != nullptr) {
+    resource_manager_->releaseResource(handle_);
+  }
+  resource_manager_ = nullptr;
 }
 
 ResourceManager::ResourceManager(StrandGroup strands) : strands_{ std::move(strands) } {}
 
-auto ResourceManager::acquireShaderSourceResource(
-    const ShaderSourceResourceDescriptor& shader_resource_description)
-    -> boost::asio::awaitable<std::expected<ShaderSourceResourceHandle, std::error_code>> {
-
-  co_return co_await boost::asio::co_spawn(
-      strands_.getStrand(StrandLanes::Shaders),
-      doAcquireShaderSourceResource(shader_resource_description), boost::asio::use_awaitable);
+auto ResourceManager::acquireResource(const ResourceDescriptor& descriptor)
+    -> asio::awaitable<std::expected<ResourceLease, std::error_code>> {
+  assert(static_cast<size_t>(descriptor.type_) != 0);
+  co_return co_await asio::co_spawn(
+      strands_.getStrand(descriptor.type_), doAcquireResource(descriptor), asio::use_awaitable);
 }
 
-auto ResourceManager::releaseShaderSourceResource(ShaderSourceResourceHandle shader_resource_handle)
-    -> boost::asio::awaitable<void> {
+void ResourceManager::releaseResource(ResourceHandle handle) {
+  asio::co_spawn(
+      strands_.getStrand(handle.type_),
+      [this, handle]() -> asio::awaitable<void> {
+        auto& resource_storage = contexts_[toIndex(handle.type_)].resources_;
+        auto& cache = contexts_[toIndex(handle.type_)].cache_;
+        auto& free_list = contexts_[toIndex(handle.type_)].free_list_;
 
-  co_return co_await boost::asio::co_spawn(
-      strands_.getStrand(StrandLanes::Shaders), doReleaseShaderSourceResource(shader_resource_handle),
-      boost::asio::use_awaitable);
+        auto& resource_slot = resource_storage[handle.index_];
+
+        assert(resource_slot.generation_ == handle.generation_);
+        assert(resource_slot.reference_counter_ > 0);
+
+        if (--resource_slot.reference_counter_ == 0) {
+          LOG_DEBUG("releasing shader resource; path: {}", resource_slot.descriptor_.path_);
+
+          cache.erase(resource_slot.descriptor_);
+
+          resource_slot.generation_++;
+          resource_slot.resource_.reset();
+          resource_slot.loaded_ = false;
+
+          free_list.emplace_back(handle.index_);
+        }
+
+        co_return;
+      },
+      asio::detached);
 }
 
-auto ResourceManager::getShader(ShaderSourceResourceHandle shader_resource_handle) const
-    -> const ShaderSourceResource& {
-
-  return *shader_source_resources_[shader_resource_handle.index_].shader_resource_;
+auto ResourceManager::getResource(const ResourceLease& lease) const
+    -> boost::asio::awaitable<const Resource*> {
+  co_return co_await asio::co_spawn(
+      strands_.getStrand(lease.handle_.type_),
+      [this, handle = lease.handle_]() -> asio::awaitable<const Resource*> {
+        const auto& resource_storage = contexts_[toIndex(handle.type_)].resources_;
+        co_return resource_storage[handle.index_].resource_.get();
+      },
+      asio::use_awaitable);
 }
 
-auto ResourceManager::doAcquireShaderSourceResource(const ShaderSourceResourceDescriptor& shader_key)
-    -> boost::asio::awaitable<std::expected<ShaderSourceResourceHandle, std::error_code>> {
+/*
+ *  Private
+ */
 
+auto ResourceManager::doAcquireResource(const ResourceDescriptor& descriptor)
+    -> asio::awaitable<std::expected<ResourceLease, std::error_code>> {
   constexpr std::chrono::microseconds WaitDuration{ 50 };
-  auto executor = co_await boost::asio::this_coro::executor;
 
-  LOG_DEBUG("loading shader; path: {}", shader_key.path);
+  auto& resource_storage{ contexts_[toIndex(descriptor.type_)].resources_ };
+  auto& cache{ contexts_[toIndex(descriptor.type_)].cache_ };
+  auto& free_list{ contexts_[toIndex(descriptor.type_)].free_list_ };
 
-  if (auto iterator = shader_source_resource_cache_.find(shader_key);
-      iterator != shader_source_resource_cache_.end()) {
-    assert(iterator->second.generation_ == shader_source_resources_[iterator->second.index_].generation_);
-    shader_source_resources_[iterator->second.index_].reference_counter_++;
+  auto executor = co_await asio::this_coro::executor;
 
-    while (shader_source_resources_[iterator->second.index_].loading_) {
-      co_await boost::asio::steady_timer(executor, WaitDuration)
-          .async_wait(boost::asio::use_awaitable);
+  LOG_DEBUG("loading {}; path: {}", magic_enum::enum_name(descriptor.type_), descriptor.path_);
+
+  if (auto iterator = cache.find(descriptor); iterator != cache.end()) {
+    auto& cached_handle = iterator->second;
+    auto* resource_slot = &resource_storage[cached_handle.index_];
+
+    assert(cached_handle.generation_ == resource_slot->generation_);
+    resource_slot->reference_counter_++;
+
+    while (resource_slot->loading_) {
+      co_await asio::steady_timer(executor, WaitDuration).async_wait(asio::use_awaitable);
+
+      // we need to reload resource slot because the vector may have resized while we were awaiting
+      // async read.
+      auto* resource_slot = &resource_storage[cached_handle.index_];
     }
 
-    assert(shader_source_resources_[iterator->second.index_].loaded_);
-    LOG_DEBUG("loading shader using cached value; path {}", shader_key.path);
-    co_return iterator->second;
+    assert(resource_slot->loaded_);
+
+    if (!resource_slot->loaded_) {
+      LOG_DEBUG(
+          "cached {} resource not loaded; path {}", magic_enum::enum_name(descriptor.type_),
+          descriptor.path_);
+
+      releaseResource(cached_handle);
+      co_return std::unexpected(Error::InternalError);
+    }
+
+    LOG_DEBUG(
+        "loading {} resource using cached value; path {}", magic_enum::enum_name(descriptor.type_),
+        descriptor.path_);
+    co_return ResourceLease{ this, cached_handle };
   }
 
-  auto file = std::make_shared<boost::asio::stream_file>(
-      strands_.getExecutor(), shader_key.path, boost::asio::stream_file::read_only);
-  auto dynamic_buffer = std::make_shared<boost::asio::streambuf>();
+  auto file = std::make_shared<asio::stream_file>(
+      strands_.getExecutor(), descriptor.path_, asio::stream_file::read_only);
+  auto dynamic_buffer = std::make_shared<asio::streambuf>();
 
-  size_t shader_resource_slot_index = 0;
+  size_t slot_index = 0;
 
-  if (shaders_source_resource_free_list_.empty()) {
-    shader_source_resources_.emplace_back();
-    shader_resource_slot_index = shader_source_resources_.size() - 1;
-    shader_source_resources_[shader_resource_slot_index].index_ = shader_resource_slot_index;
+  if (free_list.empty()) {
+    resource_storage.emplace_back();
+    slot_index = resource_storage.size() - 1;
   } else {
-    shader_resource_slot_index = shaders_source_resource_free_list_.back();
-    shaders_source_resource_free_list_.pop_back();
+    slot_index = free_list.back();
+    free_list.pop_back();
   }
 
-  auto [iter, inserted] = shader_source_resource_cache_.emplace(
-      shader_key, ShaderSourceResourceHandle{ .index_ = shader_resource_slot_index, .generation_ = 0 });
+  auto* resource_slot = &resource_storage[slot_index];
+  resource_slot->reference_counter_++;
+  resource_slot->index_ = slot_index;
+  resource_slot->loading_ = true;
 
-  auto guard = gsl::finally([&] {
-    if (shader_source_resources_[shader_resource_slot_index].loading_) {
-      LOG_DEBUG("loading shader resource aborted");
-      shader_source_resource_cache_.erase(shader_key);
-      shaders_source_resource_free_list_.push_back(shader_resource_slot_index);
-    }
-  });
+  auto [iterator, inserted] = cache.emplace(
+      descriptor, ResourceHandle{ .type_ = descriptor.type_,
+                                  .index_ = slot_index,
+                                  .generation_ = resource_slot->generation_ });
 
-  shader_source_resources_[shader_resource_slot_index].loading_ = true;
+  // It's not possible for another strand to create a same cache entry. Reused slots would have been
+  // removed from cache.
+  assert(inserted);
 
-  auto [error_code, bytes] = co_await boost::asio::async_read(
-      *file, *dynamic_buffer, boost::asio::transfer_all(),
-      boost::asio::as_tuple(boost::asio::use_awaitable));
+  auto& handle = iterator->second;
 
-  if (error_code == boost::asio::error::eof || !error_code) {
+  auto [error_code, bytes] = co_await asio::async_read(
+      *file, *dynamic_buffer, asio::transfer_all(), asio::as_tuple(asio::use_awaitable));
+
+  // we need to reload resource slot because the vector may have resized while we were awaiting
+  // async read.
+  resource_slot = &resource_storage[slot_index];
+
+  if (error_code == asio::error::eof || !error_code) {
     std::istream input_stream(dynamic_buffer.get());
     std::vector<char> buffer(
         (std::istreambuf_iterator<char>(input_stream)), std::istreambuf_iterator<char>());
 
-    if (buffer.size() % 4 != 0) {
-      LOG_ERROR("Shader file size is not multiple of 4 bytes");
-      co_return std::unexpected(Error::InternalError);
-    }
+    auto resource = std::make_unique<Resource>();
+    resource->data_.resize(buffer.size());
+    std::memcpy(resource->data_.data(), buffer.data(), buffer.size());
+    resource->hash_ = hash(resource->data_);
 
-    auto shader_resource = std::make_unique<ShaderSourceResource>();
-    shader_resource->spirv_.resize(buffer.size() / 4);
-    std::memcpy(shader_resource->spirv_.data(), buffer.data(), buffer.size());
-    shader_resource->hash_ = hash(shader_resource->spirv_);
-
-    shader_source_resources_[shader_resource_slot_index].shader_resource_ = std::move(shader_resource);
-    shader_source_resources_[shader_resource_slot_index].loaded_ = true;
+    resource_slot->resource_ = std::move(resource);
+    resource_slot->loaded_ = true;
 
     LOG_DEBUG(
-        "loading shader successful; index: {}, generation: {}", shader_resource_slot_index,
-        shader_source_resources_[shader_resource_slot_index].generation_);
+        "loading {} resource was successful; path: {}, index: {}, generation: {}",
+        magic_enum::enum_name(descriptor.type_), descriptor.path_, slot_index,
+        resource_slot->generation_);
 
   } else {
-    LOG_ERROR("shader module read error: {}", error_code.message());
+    LOG_ERROR(
+        "failed to read {} resource; path: {}; error: {}", magic_enum::enum_name(descriptor.type_),
+        descriptor.path_, error_code.message());
+    resource_slot->loading_ = false;
+    releaseResource(handle);
+
     co_return std::unexpected(Error::InternalError);
   }
 
-  shader_source_resources_[shader_resource_slot_index].key_ = shader_key;
-  shader_source_resources_[shader_resource_slot_index].loading_ = false;
-  shader_source_resources_[shader_resource_slot_index].reference_counter_++;
+  resource_slot->descriptor_ = descriptor;
+  resource_slot->loading_ = false;
 
-  co_return iter->second;
-}
-
-auto ResourceManager::doReleaseShaderSourceResource(ShaderSourceResourceHandle shader_resource_handle)
-    -> boost::asio::awaitable<void> {
-
-  assert(
-      shader_source_resources_[shader_resource_handle.index_].generation_ ==
-      shader_resource_handle.generation_);
-  assert(shader_source_resources_[shader_resource_handle.index_].reference_counter_ > 0);
-
-  if (--shader_source_resources_[shader_resource_handle.index_].reference_counter_ == 0) {
-    LOG_DEBUG(
-        "releasing shader resource; path: {}",
-        shader_source_resources_[shader_resource_handle.index_].key_.path);
-
-    shader_source_resource_cache_.erase(shader_source_resources_[shader_resource_handle.index_].key_);
-
-    shader_source_resources_[shader_resource_handle.index_].generation_++;
-    shader_source_resources_[shader_resource_handle.index_].shader_resource_.reset();
-    shader_source_resources_[shader_resource_handle.index_].loaded_ = false;
-  }
-
-  co_return;
+  co_return ResourceLease{ this, handle };
 }
 
 }  // namespace gravity

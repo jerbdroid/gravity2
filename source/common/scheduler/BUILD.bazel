@@ -12,5 +12,6 @@ gravity_cc_library(
         "//source/common/logging:logger",
         "@abseil-cpp//absl/strings",
         "@boost.asio",
+        "@magic_enum",
     ],
 )

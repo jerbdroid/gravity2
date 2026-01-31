@@ -11,6 +11,7 @@
 
 #include <expected>
 #include <system_error>
+#include <vector>
 
 namespace gravity {
 
@@ -38,39 +39,44 @@ auto RenderingServer::loadAsset(AssetId asset_id) -> boost::asio::awaitable<std:
     co_return asset.error();
   }
 
-  switch (asset.value()->type) {
-    case AssetType::Shader: {
-      auto shader_resource_expect = co_await co_spawn(
-          strands_.getStrand(StrandLanes::Main),
-          loadShader(std::get<ShaderDescriptor>(asset.value()->data_)), boost::asio::use_awaitable);
-
-      if (!shader_resource_expect) {
-        LOG_ERROR("failed to load shader resource");
-        co_return shader_resource_expect.error();
-      }
-
-      shader_resource_cache_.emplace(asset_id, std::move(shader_resource_expect.value()));
+  auto loadAndCache = [&](auto&& load_coroutine,
+                          auto& cache) -> boost::asio::awaitable<std::error_code> {
+    if (cache.contains(asset_id)) {
+      LOG_DEBUG("asset already loaded");
       co_return Error::OK;
     }
+
+    auto resource = co_await co_spawn(
+        strands_.getStrand(StrandLanes::Main), std::move(load_coroutine),
+        boost::asio::use_awaitable);
+
+    if (!resource) {
+      LOG_ERROR("failed to load resource");
+      co_return resource.error();
+    }
+
+    cache.emplace(asset_id, std::move(*resource));
+    co_return Error::OK;
+  };
+
+  const auto& asset_descriptor = *asset.value();
+  switch (asset_descriptor.type) {
+    case AssetType::Shader:
+      co_return co_await loadAndCache(
+          loadShader(std::get<ShaderDescriptor>(asset_descriptor.data_)), shader_resource_cache_);
     case AssetType::Texture:
-      co_return Error::UnimplementedError;
+      co_return co_await loadAndCache(
+          loadTexture(std::get<TextureDescriptor>(asset_descriptor.data_)),
+          texture_resource_cache_);
     case AssetType::Mesh:
-      co_return Error::UnimplementedError;
-
-    case AssetType::Material: {
-      auto material_resource_expect = co_await co_spawn(
-          strands_.getStrand(StrandLanes::Main),
-          loadMaterial(std::get<MaterialDescriptor>(asset.value()->data_)),
-          boost::asio::use_awaitable);
-
-      if (!material_resource_expect) {
-        LOG_ERROR("failed to load material resource");
-        co_return material_resource_expect.error();
-      }
-
-      material_resource_cache_.emplace(asset_id, std::move(material_resource_expect.value()));
-      co_return Error::OK;
-    }
+      co_return co_await loadAndCache(
+          loadMesh(std::get<MeshDescriptor>(asset_descriptor.data_)), mesh_resource_cache_);
+    case AssetType::Material:
+      co_return co_await loadAndCache(
+          loadMaterial(std::get<MaterialDescriptor>(asset_descriptor.data_)),
+          material_resource_cache_);
+    default:
+      std::unreachable();
   }
 }
 
@@ -102,7 +108,7 @@ auto RenderingServer::loadShader(const ShaderDescriptor& shader_descriptor)
     auto index_opt = magic_enum::enum_index(shader_stage);
     if (!index_opt) {
       LOG_ERROR("Invalid shader stage enum value {}", magic_enum::enum_name(shader_stage));
-      co_return std::unexpected(make_error_code(Error::NotFoundError));
+      co_return std::unexpected(make_error_code(Error::InternalError));
     }
     const auto index = *index_opt;
 
@@ -117,32 +123,50 @@ auto RenderingServer::loadShaderStage(
     ShaderStage stage, const ShaderStageDescriptor& shader_stage_descriptor)
     -> boost::asio::awaitable<std::expected<ShaderModuleHandle, std::error_code>> {
 
-  ShaderSourceResourceDescriptor resource_descriptor{ .path = shader_stage_descriptor.spirv_path_ };
+  ResourceDescriptor resource_descriptor{ .type_ = ResourceType::Shader,
+                                          .path_ = shader_stage_descriptor.spirv_path_ };
 
-  auto handle_expect = co_await resources_.acquireShaderSourceResource(resource_descriptor);
-  if (!handle_expect) {
+  auto expect_lease = co_await resources_.acquireResource(resource_descriptor);
+  if (!expect_lease) {
     LOG_ERROR(
         "failed to load shader resource; stage: {}, spirv_path: {}", magic_enum::enum_name(stage),
-        resource_descriptor.path);
-    co_return std::unexpected(Error::InternalError);
+        resource_descriptor.path_);
+    co_return std::unexpected(expect_lease.error());
   }
 
-  auto handle = handle_expect.value();
-  const auto& shader = resources_.getShader(handle);
+  const auto& shader = *(co_await resources_.getResource(expect_lease.value()));
+
+  std::vector<uint32_t> spirv;
+  spirv.resize(shader.data_.size() / sizeof(uint32_t));
+  std::memcpy(spirv.data(), shader.data_.data(), shader.data_.size());
 
   ShaderModuleDescriptor descriptor{
     .stage_ = stage,
-    .spirv_ = shader.spirv_,
+    .spirv_ = spirv,
     .hash_ = shader.hash_,
   };
 
-  auto shader_handle{ co_await device_.createShaderModule(descriptor) };
-  co_await resources_.releaseShaderSourceResource(handle);
-  co_return shader_handle;
+  co_return co_await device_.createShaderModule(descriptor);
 }
 
 auto RenderingServer::loadMaterial(const MaterialDescriptor& material_descriptor)
     -> boost::asio::awaitable<std::expected<MaterialResource, std::error_code>> {
+  co_return std::unexpected(Error::UnimplementedError);
+}
+
+auto RenderingServer::loadMesh(const MeshDescriptor& mesh_descriptor)
+    -> boost::asio::awaitable<std::expected<MeshResource, std::error_code>> {
+  co_return std::unexpected(Error::UnimplementedError);
+}
+
+auto RenderingServer::loadTexture(const TextureDescriptor& mesh_descriptor)
+    -> boost::asio::awaitable<std::expected<TextureResource, std::error_code>> {
+
+  // ShaderSourceResourceDescriptor resource_descriptor{ .path = shader_stage_descriptor.spirv_path_
+  // };
+
+  // auto handle_expect = co_await resources_.acquireShaderSourceResource(resource_descriptor);
+
   co_return std::unexpected(Error::UnimplementedError);
 }
 

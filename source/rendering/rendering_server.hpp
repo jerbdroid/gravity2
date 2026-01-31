@@ -1,6 +1,7 @@
 #pragma once
 
 #include "asset_manager.hpp"
+#include "common/asset_types.hpp"
 #include "source/common/scheduler/scheduler.hpp"
 #include "source/rendering/asset_manager.hpp"
 #include "source/rendering/device/rendering_device.hpp"
@@ -23,6 +24,10 @@ struct ShaderResource {
 struct MaterialDescription {};
 
 struct MaterialResource {};
+
+struct MeshResource {};
+
+struct TextureResource {};
 
 class RenderingServer {
  public:
@@ -50,6 +55,8 @@ class RenderingServer {
 
   std::unordered_map<AssetId, ShaderResource> shader_resource_cache_;
   std::unordered_map<AssetId, MaterialResource> material_resource_cache_;
+  std::unordered_map<AssetId, MeshResource> mesh_resource_cache_;
+  std::unordered_map<AssetId, TextureResource> texture_resource_cache_;
 
   auto loadShader(const ShaderDescriptor& shader_descriptor)
       -> boost::asio::awaitable<std::expected<ShaderResource, std::error_code>>;
@@ -58,6 +65,12 @@ class RenderingServer {
 
   auto loadMaterial(const MaterialDescriptor& material_descriptor)
       -> boost::asio::awaitable<std::expected<MaterialResource, std::error_code>>;
+
+  auto loadMesh(const MeshDescriptor& mesh_descriptor)
+      -> boost::asio::awaitable<std::expected<MeshResource, std::error_code>>;
+
+  auto loadTexture(const TextureDescriptor& mesh_descriptor)
+      -> boost::asio::awaitable<std::expected<TextureResource, std::error_code>>;
 };
 
 }  // namespace gravity

@@ -374,7 +374,7 @@ void displayPhysicalDeviceProperties(vk::PhysicalDevice device) {
   const auto& device_properties{ device.getProperties() };
   std::string device_name{ device_properties.deviceName.data() };
 
-  LOG_INFO(
+  LOG_DEBUG(
       "{}:\n\tvendor_id: {}\n\tdevice_id: {}\n\tdevice_type: "
       "{}\n\nLimits:{}",
       device_name, device_properties.vendorID, device_properties.deviceID,
@@ -801,7 +801,8 @@ namespace gravity {
 using boost::asio::co_spawn;
 using boost::asio::use_awaitable;
 
-auto operator==(const ShaderModuleDescriptor& descriptor, const ShaderModuleDescriptor& other_description)
+auto operator==(
+    const ShaderModuleDescriptor& descriptor, const ShaderModuleDescriptor& other_description)
     -> bool {
   return descriptor.hash_ == other_description.hash_ &&
          descriptor.stage_ == other_description.stage_;
@@ -902,7 +903,7 @@ auto VulkanRenderingDevice::prepareBuffers() -> boost::asio::awaitable<std::erro
       continue;
     }
 
-    LOG_ERROR("Unexpected Vulkan result: {}", vk::to_string(result));
+    LOG_ERROR("unexpected Vulkan result: {}", vk::to_string(result));
     co_return Error::InternalError;
   }
 }
@@ -1386,7 +1387,7 @@ auto VulkanRenderingDevice::doCreateShader(ShaderModuleDescriptor descriptor)
 
   auto [iter, inserted] = shader_module_cache_.emplace(
       descriptor, ShaderModuleHandle{ .index_ = shader_modules_[slot_index].index_,
-                                .generation_ = shader_modules_[slot_index].generation_ });
+                                      .generation_ = shader_modules_[slot_index].generation_ });
 
   LOG_DEBUG(
       "create shader; shader_type: {}, shader_module_allocator_size: {}",
@@ -1404,7 +1405,7 @@ auto VulkanRenderingDevice::doCreateShader(ShaderModuleDescriptor descriptor)
   }
 
   shader_modules_[slot_index].shader_ =
-      std::make_unique<ShaderSourceResource>(std::move(*shader_module_expect), descriptor.stage_);
+      std::make_unique<ShaderModule>(std::move(*shader_module_expect), descriptor.stage_);
   shader_modules_[slot_index].reference_counter_++;
   shader_modules_[slot_index].loaded_ = true;
   shader_modules_[slot_index].loading_ = false;
@@ -1417,7 +1418,7 @@ auto VulkanRenderingDevice::doCreateShader(ShaderModuleDescriptor descriptor)
       shader_modules_.size());
 
   co_return ShaderModuleHandle{ .index_ = shader_modules_[slot_index].index_,
-                          .generation_ = shader_modules_[slot_index].generation_ };
+                                .generation_ = shader_modules_[slot_index].generation_ };
 }
 
 auto VulkanRenderingDevice::doDestroyShader(ShaderModuleHandle shader_handle)

@@ -119,7 +119,7 @@ class VulkanRenderingDevice : public RenderingDevice {
     size_t index_ = 0;
   };
 
-  struct ShaderSourceResource {
+  struct ShaderModule {
     vk::raii::ShaderModule module_;
     ShaderStage stage_ = ShaderStage::Vertex;
   };
@@ -127,7 +127,7 @@ class VulkanRenderingDevice : public RenderingDevice {
   struct ShaderSlot {
     ShaderModuleDescriptor description_;
 
-    std::unique_ptr<ShaderSourceResource> shader_;
+    std::unique_ptr<ShaderModule> shader_;
 
     uint32_t generation_ = 0;
     size_t index_ = 0;

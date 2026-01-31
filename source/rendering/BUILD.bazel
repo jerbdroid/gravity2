@@ -46,6 +46,7 @@ gravity_cc_library(
         "//source/rendering/common:rendering_api",
         "@boost.asio",
         "@gsl",
+        "@magic_enum",
     ],
 )
 

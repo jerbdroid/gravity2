@@ -4,6 +4,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "boost/asio.hpp"
+#include "magic_enum.hpp"
 
 #include <thread>
 #include <utility>
@@ -24,13 +25,17 @@ struct Worker {
 template <typename System>
 class StrandGroup {
  public:
-  using StrandType =
-      std::array<boost::asio::any_io_executor, static_cast<size_t>(System::StrandLanes::_Count)>;
+  using StrandType = std::array<
+      boost::asio::any_io_executor, magic_enum::enum_count<typename System::StrandLanes>()>;
 
   StrandGroup<System>(boost::asio::io_context::executor_type io_executor, StrandType strands)
       : io_executor_{ std::move(io_executor) }, strands_{ std::move(strands) } {}
 
-  auto getStrand(System::StrandLanes lane) -> auto& { return strands_[static_cast<size_t>(lane)]; }
+  [[nodiscard]] auto getStrand(System::StrandLanes lane) const -> auto& {
+    auto index = magic_enum::enum_index(lane);
+    assert(index.has_value());
+    return strands_[index.value()];
+  }
 
   auto getExecutor() -> boost::asio::io_context::executor_type { return io_executor_; }
 

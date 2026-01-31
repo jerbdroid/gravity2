@@ -27,6 +27,15 @@ static constexpr const char* TexturesParameter{ "textures" };
 static constexpr const char* ParametersParameter{ "parameters" };
 static constexpr const char* AssetParameter{ "asset" };
 static constexpr const char* SamplerParameter{ "sampler" };
+static constexpr const char* ImageParameter{ "image" };
+static constexpr const char* ColourSpaceParameter{ "colour_space" };
+static constexpr const char* MipmapsParameter{ "mipmaps" };
+
+static constexpr const char* SourceParameter{ "source" };
+static constexpr const char* SubmeshesParameter{ "submeshes" };
+static constexpr const char* FirstIndexParameter{ "first_index" };
+static constexpr const char* IndexCountParameter{ "index_count" };
+static constexpr const char* MaterialParameter{ "material" };
 
 static constexpr std::array<RequiredParameters, 1> ShaderRequiredParameters{
   { { .name_ = StagesParameter, .expected_type_ = ExpectedTypes::List } }
@@ -52,6 +61,24 @@ static constexpr std::array<RequiredParameters, 3> MaterialTextureRequiredParame
   { { .name_ = NameParameter, .expected_type_ = ExpectedTypes::String },
     { .name_ = AssetParameter, .expected_type_ = ExpectedTypes::Integer },
     { .name_ = SamplerParameter, .expected_type_ = ExpectedTypes::String } }
+};
+
+static constexpr std::array<RequiredParameters, 3> TextureRequiredParameters{
+  { { .name_ = ImageParameter, .expected_type_ = ExpectedTypes::String },
+    { .name_ = ColourSpaceParameter, .expected_type_ = ExpectedTypes::String },
+    { .name_ = MipmapsParameter, .expected_type_ = ExpectedTypes::Boolean } }
+};
+
+static constexpr std::array<RequiredParameters, 2> MeshRequiredParameters{
+  { { .name_ = SourceParameter, .expected_type_ = ExpectedTypes::String },
+    { .name_ = SubmeshesParameter, .expected_type_ = ExpectedTypes::List } }
+};
+
+static constexpr std::array<RequiredParameters, 4> SubmeshRequiredParameters{
+  { { .name_ = NameParameter, .expected_type_ = ExpectedTypes::String },
+    { .name_ = FirstIndexParameter, .expected_type_ = ExpectedTypes::Integer },
+    { .name_ = IndexCountParameter, .expected_type_ = ExpectedTypes::Integer },
+    { .name_ = MaterialParameter, .expected_type_ = ExpectedTypes::Integer } }
 };
 
 auto AssetManager::initialize() -> boost::asio::awaitable<std::error_code> {
@@ -111,21 +138,37 @@ auto AssetManager::initialize() -> boost::asio::awaitable<std::error_code> {
         case AssetType::Shader: {
           auto shader_descriptor_expect{ parseShaderDescriptor(asset) };
           if (!shader_descriptor_expect) {
-            LOG_ERROR("asset database ");
+            LOG_ERROR("corrupt asset database");
             co_return shader_descriptor_expect.error();
           }
           iterator->second.data_ = std::move(shader_descriptor_expect.value());
 
           break;
         }
-        case AssetType::Texture:
+        case AssetType::Texture: {
+          auto texture_descriptor_expect{ parseTextureDescriptor(asset) };
+          if (!texture_descriptor_expect) {
+            LOG_ERROR("corrupt asset database");
+            co_return texture_descriptor_expect.error();
+          }
+          iterator->second.data_ = std::move(texture_descriptor_expect.value());
+
           break;
-        case AssetType::Mesh:
+        }
+        case AssetType::Mesh: {
+          auto mesh_descriptor_expect{ parseMeshDescriptor(asset) };
+          if (!mesh_descriptor_expect) {
+            LOG_ERROR("corrupt asset database");
+            co_return mesh_descriptor_expect.error();
+          }
+          iterator->second.data_ = std::move(mesh_descriptor_expect.value());
+
           break;
+        }
         case AssetType::Material: {
           auto material_descriptor_expect{ parseMaterialDescriptor(asset) };
           if (!material_descriptor_expect) {
-            LOG_ERROR("asset database ");
+            LOG_ERROR("corrupt asset database");
             co_return material_descriptor_expect.error();
           }
           iterator->second.data_ = std::move(material_descriptor_expect.value());
@@ -169,6 +212,11 @@ auto AssetManager::validateRequiredParameters(
         break;
       case ExpectedTypes::List:
         if (!object.at(parameter.name_).is_array()) {
+          return Error::SchemaError;
+        }
+        break;
+      case ExpectedTypes::Boolean:
+        if (!object.at(parameter.name_).is_bool()) {
           return Error::SchemaError;
         }
         break;
@@ -230,19 +278,67 @@ auto AssetManager::parseMaterialDescriptor(const boost::json::object& asset)
       return std::unexpected(error);
     }
 
-    auto& texture_descriptor{ material_descriptor.textures_.emplace_back() };
-    texture_descriptor.name_ = texture.at(NameParameter).as_string();
-    texture_descriptor.texture_asset_ = texture.at(AssetParameter).as_int64();
+    auto& material_texture_descriptor{ material_descriptor.textures_.emplace_back() };
+    material_texture_descriptor.name_ = texture.at(NameParameter).as_string();
+    material_texture_descriptor.texture_asset_ = texture.at(AssetParameter).as_int64();
 
     auto sampler_expect{ samplerTypeFromString(texture.at(SamplerParameter).as_string()) };
     if (!sampler_expect) {
       return std::unexpected(sampler_expect.error());
     }
 
-    texture_descriptor.sampler_ = sampler_expect.value();
+    material_texture_descriptor.sampler_ = sampler_expect.value();
   }
 
   return material_descriptor;
+}
+
+auto AssetManager::parseTextureDescriptor(const boost::json::object& asset)
+    -> std::expected<TextureDescriptor, std::error_code> {
+  if (auto error{ validateRequiredParameters(asset, TextureRequiredParameters) };
+      error != Error::OK) {
+    return std::unexpected(error);
+  }
+
+  return TextureDescriptor{
+    .image_path_ = std::string(asset.at(ImageParameter).as_string()),
+    .color_space_ = std::string(asset.at(ColourSpaceParameter).as_string()),
+    .mipmaps_ = asset.at(MipmapsParameter).as_bool(),
+  };
+}
+
+auto AssetManager::parseMeshDescriptor(const boost::json::object& asset)
+    -> std::expected<MeshDescriptor, std::error_code> {
+  if (auto error{ validateRequiredParameters(asset, MeshRequiredParameters) }; error != Error::OK) {
+    return std::unexpected(error);
+  }
+
+  const auto& submeshes{ asset.at(SubmeshesParameter).as_array() };
+
+  MeshDescriptor mesh_descriptor{ .source_ = std::string(asset.at(SourceParameter).as_string()) };
+  for (const auto& submesh_object : submeshes) {
+    if (!submesh_object.is_object()) {
+      return std::unexpected(Error::SchemaError);
+    }
+    const auto& submesh = submesh_object.as_object();
+
+    if (auto error{ validateRequiredParameters(submesh, SubmeshRequiredParameters) };
+        error != Error::OK) {
+      return std::unexpected(error);
+    }
+
+    ;
+    mesh_descriptor.submeshes_.emplace_back(
+        SubmeshDescriptor{
+            .name_ = std::string(submesh.at(NameParameter).as_string()),
+            .first_index_ = submesh.at(FirstIndexParameter).as_int64(),
+            .index_count_ = submesh.at(IndexCountParameter).as_int64(),
+            .material_asset_ = submesh.at(MaterialParameter).as_int64(),
+
+        });
+  }
+
+  return mesh_descriptor;
 }
 
 }  // namespace gravity

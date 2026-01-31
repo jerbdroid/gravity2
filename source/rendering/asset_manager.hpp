@@ -1,10 +1,10 @@
 #pragma once
 
-#include "boost/json/object.hpp"
 #include "common/asset_types.hpp"
 #include "source/rendering/common/asset_types.hpp"
 
 #include "boost/asio/awaitable.hpp"
+#include "boost/json/object.hpp"
 
 #include <cstdint>
 #include <expected>
@@ -14,7 +14,7 @@
 
 namespace gravity {
 
-enum class ExpectedTypes : uint8_t { String, Integer, List };
+enum class ExpectedTypes : uint8_t { String, Integer, Boolean, List };
 
 struct RequiredParameters {
   const char* name_;
@@ -40,6 +40,12 @@ class AssetManager {
 
   static auto parseMaterialDescriptor(const boost::json::object& asset)
       -> std::expected<MaterialDescriptor, std::error_code>;
+
+  static auto parseTextureDescriptor(const boost::json::object& asset)
+      -> std::expected<TextureDescriptor, std::error_code>;
+
+  static auto parseMeshDescriptor(const boost::json::object& asset)
+      -> std::expected<MeshDescriptor, std::error_code>;
 };
 
 }  // namespace gravity
